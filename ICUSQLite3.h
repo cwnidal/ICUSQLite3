@@ -26,6 +26,8 @@
 
 //	:TODO: (see list)
 //	-	 Update all int's to int32_t /etc.
+//	-	Const correctness needed all over!!
+//	-	See some of the tricks here: https://src.chromium.org/svn/trunk/src/sql/connection.cc
 
 #pragma once
 
@@ -79,8 +81,10 @@ enum EIcuSqlite3ExtOpenFlags {
 	ICUSQLITE_EXT_OPEN_NONE		= 0x00000000,
 	ICUSQLITE_EXT_OPEN_UTF16	= 0x00000001,
 	ICUSQLITE_EXT_OPEN_ICUEXT	= 0x00000002,	//	ICU extensions (e.g.: LOWER(s, locale), etc.)
+	ICUSQLITE_EXT_OPEN_FK		= 0x00000004,	//	enable foreign keys at open
+	ICUSQLITE_EXT_OPEN_WAL		= 0x00000008,	//	Utilize WAL mode
 
-	ICUSQLITE_EXT_OPEN_DEFAULT = ICUSQLITE_EXT_OPEN_ICUEXT,
+	ICUSQLITE_EXT_OPEN_DEFAULT = (ICUSQLITE_EXT_OPEN_ICUEXT | ICUSQLITE_EXT_OPEN_FK),
 };
 
 enum EIcuSqlite3SupportFlags {
@@ -117,6 +121,26 @@ enum EIcuSqlite3Config {
 	ICUSQLITE_CONFIG_LOG          		= 16,  /* xFunc, void* */
 };
 
+enum EIcuSqlite3Limit {
+  ICUSQLITE_LIMIT_LENGTH              = 0,
+  ICUSQLITE_LIMIT_SQL_LENGTH          = 1,
+  ICUSQLITE_LIMIT_COLUMN              = 2,
+  ICUSQLITE_LIMIT_EXPR_DEPTH          = 3,
+  ICUSQLITE_LIMIT_COMPOUND_SELECT     = 4,
+  ICUSQLITE_LIMIT_VDBE_OP             = 5,
+  ICUSQLITE_LIMIT_FUNCTION_ARG        = 6,
+  ICUSQLITE_LIMIT_ATTACHED            = 7,
+  ICUSQLITE_LIMIT_LIKE_PATTERN_LENGTH = 8,
+  ICUSQLITE_LIMIT_VARIABLE_NUMBER     = 9,
+  ICUSQLITE_LIMIT_TRIGGER_DEPTH       = 10
+};
+
+enum EIcuSqlite3WALCheckpoint {
+	ICUSQLITE_WAL_CHECKPOINT_PASSIVE	= 0,
+	ICUSQLITE_WAL_CHECKPOINT_FULL		= 1,
+	ICUSQLITE_WAL_CHECKPOINT_RESTART	= 2,
+};
+
 class ICUSQLITE_DLLIMPEXP IcuSqlite3StatementBuffer
 {
 public:
@@ -140,9 +164,12 @@ public:
 	//IcuSqlite3FunctionContext(sqlite3_context* pContext, int argCount, sqlite3_value** ppArgs);
 	IcuSqlite3FunctionContext(void* ctxt, int argCount, void** args);
 	int GetArgCount() const;
-	UnicodeString GetArgAsUnicodeString(unsigned int n);
-	int64_t GetArgAsInt64(unsigned int n);
-	double GetArgAsDouble(unsigned int n);
+	const unsigned char* GetAsBlob(const unsigned int n, int& len);
+	UnicodeString GetArgAsUnicodeString(const unsigned int n);
+
+	int32_t GetArgAsInt(const unsigned int n);
+	int64_t GetArgAsInt64(const unsigned int n);
+	double GetArgAsDouble(const unsigned int n);
 
 	void SetResult(const UnicodeString& str);
 	void SetResult(const char* str, int length = -1);
@@ -158,12 +185,16 @@ private:
 class IcuSqlite3ScalarFunction
 {
 public:
+	virtual ~IcuSqlite3ScalarFunction() {}
+
 	virtual void Scalar(IcuSqlite3FunctionContext* pContext) = 0;
 };
 
 class IcuSqlite3AggregateFunction
 {
 public:
+	virtual ~IcuSqlite3AggregateFunction() {}
+
 	virtual void Step(IcuSqlite3FunctionContext* pContext) = 0;
 	virtual void Finalize(IcuSqlite3FunctionContext* pContext) = 0;
 };
@@ -185,58 +216,54 @@ public:
 	
 	~IcuSqlite3ResultSet();
 	
-	int GetColumnCount() { return (NULL != m_stmt) ? m_cols : 0; }
+	int GetColumnCount() const { return (nullptr != m_stmt) ? m_cols : 0; }
 
-	int FindColumnIndex(const UnicodeString& colName);
-	UnicodeString GetColumnName(const int colIdx);
-	UnicodeString GetDeclaredColumnType(const int colIdx);
-	EIcuSqlite3ColumnTypes GetColumnType(const int colIdx);
+	int FindColumnIndex(const UnicodeString& colName) const;
+	UnicodeString GetColumnName(const int colIdx) const;
+	UnicodeString GetDeclaredColumnType(const int colIdx) const;
+	EIcuSqlite3ColumnTypes GetColumnType(const int colIdx) const;
 
-	UnicodeString GetDatabaseName(const int colIdx);
-	UnicodeString GetTableName(const int colIdx);
-	UnicodeString GetOriginName(const int colIdx);
+	UnicodeString GetDatabaseName(const int colIdx) const;
+	UnicodeString GetTableName(const int colIdx) const;
+	UnicodeString GetOriginName(const int colIdx) const;
 	
-	int32_t GetInt(const int colIdx, const int32_t defVal = 0);
-	int32_t GetInt(const UnicodeString& colName, const int32_t defVal = 0);
+	int32_t GetInt(const int colIdx, const int32_t defVal = 0) const;
+	int32_t GetInt(const UnicodeString& colName, const int32_t defVal = 0) const;
 
-	int64_t GetInt64(const int colIdx, const int64_t defVal = 0);
-	int64_t GetInt64(const UnicodeString& colName, const int64_t defVal = 0);
+	int64_t GetInt64(const int colIdx, const int64_t defVal = 0) const;
+	int64_t GetInt64(const UnicodeString& colName, const int64_t defVal = 0) const;
 	
-	double GetDouble(const int colIdx, const double defVal = 0.0);
-	double GetDouble(const UnicodeString& colName, const double defVal = 0.0);
+	double GetDouble(const int colIdx, const double defVal = 0.0) const;
+	double GetDouble(const UnicodeString& colName, const double defVal = 0.0) const;
 	
-	UnicodeString GetString(const int colIdx, 
-		const UnicodeString& defVal = "");
-	UnicodeString GetString(const UnicodeString& colName,
-		const UnicodeString& defVal = "");
+	UnicodeString GetString(const int colIdx, const UnicodeString& defVal = "") const;
+	UnicodeString GetString(const UnicodeString& colName, const UnicodeString& defVal = "") const;
 
-	std::string GetStringUTF8(const int colIdx, 
-		const std::string& defVal = "");
-	std::string GetStringUTF8(const UnicodeString& colName,
-		const std::string& defVal = "");
+	std::string GetStringUTF8(const int colIdx, const std::string& defVal = "") const;
+	std::string GetStringUTF8(const UnicodeString& colName, const std::string& defVal = "") const;
 
 	UDate GetDateTime(const int colIdx, const UDate defVal = 0.0);
 	UDate GetDateTime(const UnicodeString& colName, const UDate defVal = 0.0);
 
-	bool GetBool(const int colIdx, const bool defVal = false);
-	bool GetBool(const UnicodeString& colName, const bool defVal = false);
+	bool GetBool(const int colIdx, const bool defVal = false) const;
+	bool GetBool(const UnicodeString& colName, const bool defVal = false) const;
 		
-	const unsigned char* GetBlob(const int colIdx, int& len);
-	const unsigned char* GetBlob(const UnicodeString& colName, int& len);
+	const unsigned char* GetBlob(const int colIdx, int& len) const;
+	const unsigned char* GetBlob(const UnicodeString& colName, int& len) const;
 	//	:TODO: ICU has a memory buffer, make a GetBlob() for it
 	
 	
-	bool IsNull(const int colIdx);
-	bool IsNull(const UnicodeString& colName);
+	bool IsNull(const int colIdx) const;
+	bool IsNull(const UnicodeString& colName) const;
 	
-	bool Eof() { return (NULL != m_stmt) ? m_eof : true; }
+	bool Eof() const { return (nullptr != m_stmt) ? m_eof : true; }
 	bool NextRow();
 	void Finalize();
 	
-	const char* GetRawSQL();
-	UnicodeString GetSQL();
+	const char* GetRawSQL() const;
+	UnicodeString GetSQL() const;
 	
-	bool IsOK() { return NULL != m_db && NULL != m_stmt; }
+	bool IsOK() const { return nullptr != m_db && nullptr != m_stmt; }
 private:
 	void*				m_db;
 	void*				m_stmt;
@@ -258,40 +285,37 @@ public:
 	
 	IcuSqlite3Table& operator=(const IcuSqlite3Table& table);
 	
-	int GetColumnCount() { return (NULL != m_results) ? m_cols : 0; }
-	int GetRowCount() { return (NULL != m_results) ? m_rows : 0; }
+	int GetColumnCount() const { return (nullptr != m_results) ? m_cols : 0; }
+	int GetRowCount() const { return (nullptr != m_results) ? m_rows : 0; }
 	
-	int FindColumnIndex(const char* utf8ColName);
-	int FindColumnIndex(const UnicodeString& colName);
+	int FindColumnIndex(const char* utf8ColName) const;
+	int FindColumnIndex(const UnicodeString& colName) const;
 	
-	UnicodeString GetColumnName(const int colIdx);
+	UnicodeString GetColumnName(const int colIdx) const;
 	
-	int GetInt(const int colIdx, const int defVal = 0);
-	int GetInt(const UnicodeString& colName, const int defVal = 0);
+	int GetInt(const int colIdx, const int defVal = 0) const;
+	int GetInt(const UnicodeString& colName, const int defVal = 0) const;
 	
 	//	:TODO: pass references for int64_t, double, UDate, etc.
 	
-	int64_t GetInt64(const int colIdx, const int64_t defVal = 0);
-	int64_t GetInt64(const UnicodeString& colName, const int64_t defVal = 0);
+	int64_t GetInt64(const int colIdx, const int64_t defVal = 0) const;
+	int64_t GetInt64(const UnicodeString& colName, const int64_t defVal = 0) const;
 	
-	double GetDouble(const int colIdx, const double defVal = 0.0);
-	double GetDouble(const UnicodeString& colName, const double defVal = 0.0);
+	double GetDouble(const int colIdx, const double defVal = 0.0) const;
+	double GetDouble(const UnicodeString& colName, const double defVal = 0.0) const;
 	
-	UnicodeString GetString(const int colIdx, 
-		const UnicodeString& defVal = "");
-	UnicodeString GetString(const UnicodeString& colName,
-		const UnicodeString& defVal = "");
+	UnicodeString GetString(const int colIdx, const UnicodeString& defVal = "") const;
+	UnicodeString GetString(const UnicodeString& colName, const UnicodeString& defVal = "") const;
 
-	std::string GetStringUTF8(const int colIdx, 
-		const std::string& defVal = "");
-	std::string GetStringUTF8(const UnicodeString& colName,
-		const std::string& defVal = "");
+	std::string GetStringUTF8(const int colIdx, const std::string& defVal = "") const;
+	std::string GetStringUTF8(const UnicodeString& colName, const std::string& defVal = "") const;
 
 	//
 	//	Get Date/Time as ICU UTC
 	//
 	int64_t GetDateTime64(const int colIdx, const int64_t& defVal = 0,
 		const EIcuSqlite3DTStorageTypes storedAs = ICUSQLITE_DATETIME_ISO8601);
+
 	int64_t GetDateTime64(const UnicodeString& colName, const int64_t& defVal = 0,
 		const EIcuSqlite3DTStorageTypes storedAs = ICUSQLITE_DATETIME_ISO8601);
 	
@@ -300,18 +324,19 @@ public:
 	//
 	UDate GetDateTimeUDate(const int colIdx, const UDate& defVal = 0.0,
 		const EIcuSqlite3DTStorageTypes storedAs = ICUSQLITE_DATETIME_ISO8601);
+
 	UDate GetDateTimeUDate(const UnicodeString& colName, const UDate& defVal = 0.0,
 		const EIcuSqlite3DTStorageTypes storedAs = ICUSQLITE_DATETIME_ISO8601);
 	
-	bool GetBool(const int colIdx);
-	bool GetBool(const UnicodeString& colName);
+	bool GetBool(const int colIdx) const;
+	bool GetBool(const UnicodeString& colName) const;
 	
-	bool IsNull(const int colIdx);
-	bool IsNull(const UnicodeString& colName);
+	bool IsNull(const int colIdx) const;
+	bool IsNull(const UnicodeString& colName) const;
 	
 	void SetRow(const int rowIdx)
 	{
-		if(NULL == m_results || rowIdx < 0 || rowIdx > m_rows - 1) {
+		if(nullptr == m_results || rowIdx < 0 || rowIdx > m_rows - 1) {
 			return;
 		}
 		m_currentRow = rowIdx;
@@ -319,7 +344,7 @@ public:
 
 	void Finalize();
 	
-	bool IsOK() { return (NULL != m_results); }
+	bool IsOK() const { return (nullptr != m_results); }
 private:
 	int					m_cols;
 	int					m_rows;
@@ -329,8 +354,8 @@ private:
 	
 	char* GetValue(const int colIdx) const
 	{
-		if(NULL == m_results || colIdx < 0 || colIdx > m_cols - 1) {
-			return NULL;
+		if(nullptr == m_results || colIdx < 0 || colIdx > m_cols - 1) {
+			return nullptr;
 		}
 		return m_results[(m_currentRow * m_cols) + m_cols + colIdx];
 	}
@@ -351,7 +376,14 @@ public:
 	int ExecuteUpdate();
 	
 	IcuSqlite3ResultSet ExecuteQuery();
-	
+
+	bool ExecuteScalar(UnicodeString& result);
+	bool ExecuteScalar(std::string& result);
+	bool ExecuteScalar(int32_t& result);
+	bool ExecuteScalar(int64_t& result);
+	bool ExecuteScalar(double& result);
+	bool ExecuteScalar(bool& result);
+
 	int GetParamCount();
 	int GetParamIndex(const UnicodeString& paramName);
 	UnicodeString GetParamName(const int paramIdx);
@@ -359,6 +391,7 @@ public:
 	bool Bind(const int paramIdx, const UnicodeString& paramValue);
 	bool Bind(const int paramIdx, const int paramValue);
 	bool Bind(const int paramIdx, const int64_t& paramValue);
+	bool Bind(const int paramIdx, const uint64_t& paramValue);
 	bool Bind(const int paramIdx, const double& paramValue);
 	bool Bind(const int paramIdx, const char* paramValue);
 	bool Bind(const int paramIdx, const std::string& paramValue);
@@ -377,11 +410,11 @@ public:
 	
 	void ClearBindings();
 	
-	UnicodeString GetSQL();
+	UnicodeString GetSQL() const;
 	
 	void Reset();
 	void Finalize();
-	bool IsOk() { return (NULL != m_db && NULL != m_stmt); }
+	bool IsOk() const { return (nullptr != m_db && nullptr != m_stmt); }
 private:
 	void*				m_db;
 	void*				m_stmt;
@@ -402,47 +435,53 @@ public:
 	bool Open(const UnicodeString& filename, 
 		const int flags = ICUSQLITE_OPEN_READWRITE | ICUSQLITE_OPEN_CREATE,
 		const int extFlags = ICUSQLITE_EXT_OPEN_DEFAULT,
-		const unsigned char* key = NULL,
+		const unsigned char* key = nullptr,
 		const int keyLen = 0);
 	
-	bool IsOpen() const { return (NULL != m_db); }
+	bool IsOpen() const { return (nullptr != m_db); }
 
 	void Close();
 	
 	bool Backup(const UnicodeString& targetFilename, 
 		const UnicodeString& targetKey,
 		const UnicodeString& sourceDatabase = "main");
+
 	bool Backup(const UnicodeString& targetFilename, 
-		const unsigned char* targetKey = NULL, const int keyLen = 0,
+		const unsigned char* targetKey = nullptr, const int keyLen = 0,
 		const UnicodeString& sourceDatabase = "main");
 		
 	EIcuSqlite3RestoreResults Restore(const UnicodeString& sourceFilename, 
 		const UnicodeString& sourceKey,
 		const UnicodeString& targetDatabase = "main");
+
 	EIcuSqlite3RestoreResults Restore(const UnicodeString& sourceFilename,
-		const unsigned char* sourceKey = NULL, const int keyLen = 0,
+		const unsigned char* sourceKey = nullptr, const int keyLen = 0,
 		const UnicodeString& targetDatabase = "main");
 		
 	bool Begin(const EIcuSqlite3TransTypes type = ICUSQLITE_TRANSACTION_DEFAULT);
 	bool Commit();
 	bool Rollback(const UnicodeString& savepointName = "");
 	
-	bool IsAutoCommitMode();
+	bool IsAutoCommitMode() const;
 	
 	bool Savepoint(const UnicodeString& savepointName);
 	bool ReleaseSavepoint(const UnicodeString& savepointName);
 	
-	bool TableExists(const UnicodeString& tableName, 
-		const UnicodeString& dbName = "");
-	bool TableExists(const char* tableName, const char* dbName = NULL);
+	bool TableExists(const UnicodeString& tableName, const UnicodeString& dbName = "") const;
+	bool TableExists(const char* tableName, const char* dbName = nullptr) const;
 	
 	//	:TODO: TableExists(name, std::set<UnicodeString>& dbNames)
 	
 	void GetDatabaseNames(std::set<std::string>& dbNames,
-		std::set<std::string>& dbFiles);
+		std::set<std::string>& dbFiles) const;
+
+	bool Attach(const UnicodeString& dbPath, const std::string& asName);
+
+	bool IsAttached(const std::string& alias) const;
+	int GetAttachedCount() const;
 		
 	bool EnableForeignKeySupport(const bool enable);
-	bool IsForeignKeySupportEnabled();
+	bool IsForeignKeySupportEnabled() const;
 	
 	bool CheckSyntax(const UnicodeString& sql);
 	bool CheckSyntax(const char* sql);
@@ -452,35 +491,35 @@ public:
 	int ExecuteUpdate(const char* sql);
 	int ExecuteUpdate(const IcuSqlite3StatementBuffer& sql);
 	
-	IcuSqlite3ResultSet ExecuteQuery(const UnicodeString& sql);
-	IcuSqlite3ResultSet ExecuteQuery(const char* sql);
-	IcuSqlite3ResultSet ExecuteQuery(const IcuSqlite3StatementBuffer& sql);
+	IcuSqlite3ResultSet ExecuteQuery(const UnicodeString& sql) const;
+	IcuSqlite3ResultSet ExecuteQuery(const char* sql) const;
+	IcuSqlite3ResultSet ExecuteQuery(const IcuSqlite3StatementBuffer& sql) const;
 
-	bool ExecuteScalar(const UnicodeString& sql, UnicodeString& result);
-	bool ExecuteScalar(const char* sql, UnicodeString& result);
-	bool ExecuteScalar(const UnicodeString& sql, int32_t& result);
-	bool ExecuteScalar(const char* sql, int32_t& result);
-	bool ExecuteScalar(const UnicodeString& sql, int64_t& result);
-	bool ExecuteScalar(const char* sql, int64_t& result);
-	bool ExecuteScalar(const UnicodeString& sql, double& result);
-	bool ExecuteScalar(const char* sql, double& result);
-	bool ExecuteScalar(const UnicodeString& sql, bool& result);
-	bool ExecuteScalar(const char* sql, bool& result);
-	bool ExecuteScalar(const UnicodeString& sql, std::string& result);
-	bool ExecuteScalar(const char* sql, std::string& result);
+	bool ExecuteScalar(const UnicodeString& sql, UnicodeString& result) const;
+	bool ExecuteScalar(const char* sql, UnicodeString& result) const;
+	bool ExecuteScalar(const UnicodeString& sql, int32_t& result) const;
+	bool ExecuteScalar(const char* sql, int32_t& result) const;
+	bool ExecuteScalar(const UnicodeString& sql, int64_t& result) const;
+	bool ExecuteScalar(const char* sql, int64_t& result) const;
+	bool ExecuteScalar(const UnicodeString& sql, double& result) const;
+	bool ExecuteScalar(const char* sql, double& result) const;
+	bool ExecuteScalar(const UnicodeString& sql, bool& result) const;
+	bool ExecuteScalar(const char* sql, bool& result) const;
+	bool ExecuteScalar(const UnicodeString& sql, std::string& result) const;
+	bool ExecuteScalar(const char* sql, std::string& result) const;
 	bool ExecuteScalarDateTime(const UnicodeString& sql, UDate& result);
 	bool ExecuteScalarDateTime(const char* sql, UDate& result);
 	
-	IcuSqlite3Table GetTable(const UnicodeString& sql);
-	IcuSqlite3Table GetTable(const char* sql);
-	IcuSqlite3Table GetTable(const IcuSqlite3StatementBuffer& sql);
+	IcuSqlite3Table GetTable(const UnicodeString& sql) const;
+	IcuSqlite3Table GetTable(const char* sql) const;
+	IcuSqlite3Table GetTable(const IcuSqlite3StatementBuffer& sql) const;
 	
-	IcuSqlite3Statement PrepareStatement(const UnicodeString& sql);
-	IcuSqlite3Statement PrepareStatement(const char* sql);
-	IcuSqlite3Statement PrepareStatement(const IcuSqlite3StatementBuffer& sql);
+	IcuSqlite3Statement PrepareStatement(const UnicodeString& sql) const;
+	IcuSqlite3Statement PrepareStatement(const char* sql) const;
+	IcuSqlite3Statement PrepareStatement(const IcuSqlite3StatementBuffer& sql) const;
 	
-	int64_t GetLastRowId();
-	
+	int64_t GetLastRowId() const;
+	int64_t GetChanges() const;
 	//	:TODO: GetReadOnlyBlob()
 	//	:TODO: GetWritableBlob();
 	//	:TODO: GetBlob();
@@ -499,8 +538,8 @@ public:
 	
 	void GetMetaData(const UnicodeString& dbName, 
 		const UnicodeString& tableName, const UnicodeString& colName,
-		UnicodeString* declaredDataType = NULL, 
-		UnicodeString* collation = NULL, int* flags = NULL);
+		UnicodeString* declaredDataType = nullptr, 
+		UnicodeString* collation = nullptr, int* flags = nullptr);
 	
 	bool LoadExtension(const UnicodeString& filename, 
 		const char* entryPoint = "sqlite3_extension_init");
@@ -512,16 +551,17 @@ public:
 	
 	bool IsEncrypted() const { return m_encrypted; }
 	
-	//	:TODO: GetLimit()
-	//	:TODO: SetLimit()
 	//	:TODO: static GetLimitName(id)
-	
+	UnicodeString GetDatabaseFileName(const UnicodeString& dbName) const;
+	int GetLimit(const EIcuSqlite3Limit limit) const;
+	int SetLimit(const EIcuSqlite3Limit limit, const int value);
 	
 	//
 	//	Error access
 	//
-	int GetLastErrorCode(const bool extended = false);
-	UnicodeString GetLastErrorMessage();
+	int GetLastErrorCode(const bool extended = false) const;
+	UnicodeString GetLastErrorMessage() const;
+	int GetLastSystemErrorCode() const;
 	
 	//
 	//	static methods
@@ -531,7 +571,7 @@ public:
 	static bool Randomness(unsigned char* randBuf, const int bufLen);
 	static bool EnableSharedCache(const bool enable);
 	
-	static bool IsSharedCacheEnabled() 
+	static bool IsSharedCacheEnabled()
 	{ 
 #if !defined(SQLITE_OMIT_SHARED_CACHE)
 		return ms_sharedCacheEnabled;
@@ -546,19 +586,25 @@ public:
 	
 //	static bool Config(const EIcuSqlite3Config configOpt, ...);
 	
-#if defined(ICUSQLITE3_ANDROID)	
-	static void ReleaseMemory();
+#if defined(ICUSQLITE3_ANDROID) || defined(ICUSQLITE3_IOS)
+	static int ReleaseMemory();
 #endif	//	defined(ICUSQLITE3_ANDROID)
+
+	int RecoverMemory();
+
+	bool WALCheckpoint(
+		const char* dbName = nullptr, const EIcuSqlite3WALCheckpoint checkpointType = ICUSQLITE_WAL_CHECKPOINT_PASSIVE) const;
 protected:
-	void* GetDatabaseHandle() { return m_db; }
+	void* GetDatabaseHandle() const { return m_db; }
 
 	//	:TODO: collation stuffs
+	
 	
 private:
 	void*			m_db;
 	int				m_busyTimeout;
 	bool			m_encrypted;
-	
+
 #if !defined(SQLITE_OMIT_SHARED_CACHE)
 	static bool		ms_sharedCacheEnabled;
 #endif	//	!defined(SQLITE_OMIT_SHARED_CACHE)
@@ -572,31 +618,40 @@ private:
 	static void xFunc(void* ctxt, int argCount, void** args);
 	static void xStep(void* ctxt, int argCount, void** args);
 	static void xFinalize(void* ctxt);
+	static void xDestroyScalar(void* userData);
+	static void xDestroyAggregate(void* userData);
 
-	void* Prepare(const UChar* sql, const int32_t sqlLen = -1);	
+	void* Prepare(const UChar* sql, const int32_t sqlLen = -1) const;
 };
 
 class ICUSQLITE_DLLIMPEXP IcuSqlite3Transaction
 {
 public:
 	explicit IcuSqlite3Transaction(IcuSqlite3Database* db,
-		const EIcuSqlite3TransTypes type = ICUSQLITE_TRANSACTION_DEFAULT);
+		const bool commitOnDestroy);
+	explicit IcuSqlite3Transaction(IcuSqlite3Database* db,
+		const EIcuSqlite3TransTypes type = ICUSQLITE_TRANSACTION_DEFAULT,
+		const bool commitOnDestroy = true);
 	~IcuSqlite3Transaction();
 
 	bool Open(const EIcuSqlite3TransTypes type = ICUSQLITE_TRANSACTION_DEFAULT);
 	bool Flush(const bool reOpen = false);
 	bool Rollback(const bool reOpen = false);
 	
-	bool IsOk() { return m_transOk; }
-	bool IsOpen() { return m_transOpen; }
+	bool IsOk() const { return m_transOk; }
+	bool IsOpen() const { return m_transOpen; }
 
 	bool Execute(const UnicodeString& sql);
 	bool Execute(const char* sql);
 	bool Execute(const IcuSqlite3StatementBuffer& sql);
+	bool Execute(IcuSqlite3Statement& stmt);
+	
+	int64_t GetLastRowId() const;
 private:
 	IcuSqlite3Database*	m_db;
 	bool				m_transOk;
 	bool				m_transOpen;
+	const bool			m_commitOnDestroy;
 
 	static void* operator new(size_t size);	//	this obj must be created on the stack
 	static void operator delete(void* p);

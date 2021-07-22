@@ -24,24 +24,24 @@
 #include "ICUSQLite3Utility.h"
 #include "ICUSQLite3.h"
 
-//	:TODO: const these so they don't have to go through ctor's whenever used
-#define DATETIME_MILLI_PATTERN UNICODE_STRING_SIMPLE("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
-#define DATETIME_PATTERN       UNICODE_STRING_SIMPLE("yyyy-MM-dd'T'HH:mm:ss'Z'")
-#define DATE_PATTERN           UNICODE_STRING_SIMPLE("yyyy-MM-dd")
-#define TIME_MILLI_PATTERN     UNICODE_STRING_SIMPLE("HH:mm:ss.SSS'Z'")
-#define TIME_PATTERN           UNICODE_STRING_SIMPLE("HH:mm:ss'Z'")
-
+//	statics
+UnicodeString ICUSQLite3Utility::ms_patternDateTimeMs	= UNICODE_STRING_SIMPLE("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+UnicodeString ICUSQLite3Utility::ms_patternDateTimeSec	= UNICODE_STRING_SIMPLE("yyyy-MM-dd'T'HH:mm:ss'Z'");
+UnicodeString ICUSQLite3Utility::ms_patternDateTimeMin	= UNICODE_STRING_SIMPLE("yyyy-MM-dd'T'HH:mm'Z'");
+UnicodeString ICUSQLite3Utility::ms_patternDate			= UNICODE_STRING_SIMPLE("yyyy-MM-dd");
+UnicodeString ICUSQLite3Utility::ms_patternTimeMs		= UNICODE_STRING_SIMPLE("HH:mm:ss.SSS'Z'");
+UnicodeString ICUSQLite3Utility::ms_patternTimeSec		= UNICODE_STRING_SIMPLE("HH:mm:ss'Z'");
 
 ICUSQLite3Utility::ICUSQLite3Utility()
 	: m_index(DATE_FORMAT_ISO8601_DATETIME_MILLISECONDS)
 {
 	UErrorCode ec = U_ZERO_ERROR;
-	m_dtFormat = new SimpleDateFormat(DATETIME_MILLI_PATTERN, ec);
+	m_dtFormat = new SimpleDateFormat(ms_patternDateTimeMs, ec);
 	if(U_SUCCESS(ec)) {
 		m_dtFormat->adoptTimeZone(TimeZone::createTimeZone("UTC"));
 	} else {
 		delete m_dtFormat;
-		m_dtFormat = NULL;
+		m_dtFormat = nullptr;
 	}
 }
 
@@ -57,28 +57,41 @@ void ICUSQLite3Utility::SetFormat(
 		m_index = index;
 		switch(m_index) {
 			case DATE_FORMAT_ISO8601_DATETIME:
-				m_dtFormat->applyPattern(DATETIME_PATTERN);
+				m_dtFormat->applyPattern(ms_patternDateTimeSec);
 				break;
+
 			case DATE_FORMAT_ISO8601_DATE:
-				m_dtFormat->applyPattern(DATE_PATTERN);
+				m_dtFormat->applyPattern(ms_patternDate);
 				break;
+
 			case DATE_FORMAT_ISO8601_TIME:
-				m_dtFormat->applyPattern(TIME_PATTERN);
+				m_dtFormat->applyPattern(ms_patternTimeSec);
 				break;
+
 			case DATE_FORMAT_JULIAN:
-				// :TODO: NOSHIP - Make sure this works
+				// :TODO: IMPORTANT - Make sure this works
 				m_dtFormat->applyPattern("g");
 				break;
+
 			case DATE_FORMAT_UNIX:
-				// :TODO: NOSHIP - IMPLEMENT ME!
+				// :TODO: IMPORTANT - IMPLEMENT ME!
 			case DATE_FORMAT_ICU_UTC:
-				// :TODO: NOSHIP - IMPLEMENT ME!
+				// :TODO: IMPORTANT - IMPLEMENT ME!
 				break;
+
 			case DATE_FORMAT_ISO8601_DATETIME_MILLISECONDS:
-				m_dtFormat->applyPattern(DATETIME_MILLI_PATTERN);
+				m_dtFormat->applyPattern(ms_patternDateTimeMs);
 				break;
+
 			case DATE_FORMAT_ISO8601_TIME_MILLISECONDS:
-				m_dtFormat->applyPattern(TIME_MILLI_PATTERN);
+				m_dtFormat->applyPattern(ms_patternTimeMs);
+				break;
+
+			case DATE_FORMAT_ISO8601_DATETIME_NO_SECONDS :
+				m_dtFormat->applyPattern(ms_patternDateTimeMin);
+				break;
+
+			default:
 				break;
 		}
 	}
@@ -92,24 +105,29 @@ bool ICUSQLite3Utility::Parse(
 	}
 	UErrorCode ec = U_ZERO_ERROR;
 	if(DATE_FORMAT_UNKNOWN == type) {
-		//	:TODO: make a inlined version of this so it's debuggable
-#define TRY_FORMAT(type)	\
-		SetFormat(type);	\
-		result = m_dtFormat->parse(dateTimeStr, ec);	\
-		if(U_SUCCESS(ec)) {	\
-			return true;	\
-		}	\
-		ec = U_ZERO_ERROR;
 
-		//Try various formats in order of precedence.
-		TRY_FORMAT(DATE_FORMAT_ISO8601_DATETIME_MILLISECONDS);
-		TRY_FORMAT(DATE_FORMAT_ISO8601_DATETIME);
-		TRY_FORMAT(DATE_FORMAT_ISO8601_DATE);
-		TRY_FORMAT(DATE_FORMAT_ISO8601_TIME_MILLISECONDS);
-		TRY_FORMAT(DATE_FORMAT_ISO8601_TIME);
-		TRY_FORMAT(DATE_FORMAT_ICU_UTC);
-		TRY_FORMAT(DATE_FORMAT_UNIX);
-		TRY_FORMAT(DATE_FORMAT_JULIAN);
+		//
+		//	Formats we'll loop through trying until we succeed in parsing
+		//
+		const EIcuSqlite3FormatIndex tryFormats[] = {
+			DATE_FORMAT_ISO8601_DATETIME_MILLISECONDS,
+			DATE_FORMAT_ISO8601_DATETIME,
+			DATE_FORMAT_ISO8601_DATETIME_NO_SECONDS,
+			DATE_FORMAT_ISO8601_DATE,
+			DATE_FORMAT_ISO8601_TIME_MILLISECONDS,
+			DATE_FORMAT_ISO8601_TIME,
+			DATE_FORMAT_ICU_UTC,
+			DATE_FORMAT_UNIX,
+			DATE_FORMAT_JULIAN,
+
+			DATE_FORMAT_UNKNOWN,	//	MUST BE AT THE END
+		};
+
+		for(int i = 0; tryFormats[i] != DATE_FORMAT_UNKNOWN; ++i) {
+			if(TryParseFormat(result, tryFormats[i], dateTimeStr)) {
+				return true;
+			}
+		}
 	} else {
 		switch(type) {
 			case DATE_FORMAT_ISO8601_DATETIME_MILLISECONDS:

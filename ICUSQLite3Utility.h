@@ -74,10 +74,9 @@ enum EIcuSqlite3FormatIndex {
 	DATE_FORMAT_UNIX				= ICUSQLITE_DATETIME_UNIX,
 	DATE_FORMAT_ICU_UTC				= ICUSQLITE_DATETIME_ICU_UTC,
 	DATE_FORMAT_ISO8601_DATETIME_MILLISECONDS,
+	DATE_FORMAT_ISO8601_DATETIME_NO_SECONDS,
 	DATE_FORMAT_ISO8601_TIME_MILLISECONDS,
 };
-
-enum EIcuSqlite3FormatIndex;
 
 class ICUSQLite3Utility
 {
@@ -96,6 +95,22 @@ private:
 
 	EIcuSqlite3FormatIndex	m_index;
 	SimpleDateFormat*		m_dtFormat;
+
+	static UnicodeString	ms_patternDateTimeMs;	//	date time, ms resolution
+	static UnicodeString	ms_patternDateTimeSec;	//	date time, second resolution
+	static UnicodeString	ms_patternDateTimeMin;	//	date time, minute resolution
+	static UnicodeString	ms_patternDate;			//	date only
+	static UnicodeString	ms_patternTimeMs;		//	time, ms resolution
+	static UnicodeString	ms_patternTimeSec;		//	time, second resolution
+
+	bool TryParseFormat(
+		UDate& result, const EIcuSqlite3FormatIndex formatType, const UnicodeString& dateTimeStr)
+	{
+		SetFormat(formatType);
+		UErrorCode ec = U_ZERO_ERROR;
+		result = m_dtFormat->parse(dateTimeStr, ec);
+		return (U_SUCCESS(ec)) ? true : false;
+	}
 };
 
 #endif	//	!__ICU_SQLITE3_UTILITY_H__

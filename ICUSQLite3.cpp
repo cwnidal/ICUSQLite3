@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2010 Bryan Ashby
+ Copyright (c) 2010-2012 Bryan Ashby
 
  This software is provided 'as-is', without any express or implied
  warranty. In no event will the authors be held liable for any damages
@@ -16,7 +16,7 @@
 
     2. Altered source versions must be plainly marked as such, and must not be
     misrepresented as being the original software.
-
+	
     3. This notice may not be removed or altered from any source
     distribution.
 */
@@ -40,20 +40,21 @@
 
 #include <assert.h>
 
-//	:TODO: clean this up -- the amag version of sqlite3.c contains ICU stuff
 //	SQLite3 and/or SQLite3 + ICU extensions
-//#if defined(ICUSQLITE_HAVE_ICU_EXTENSIONS)
-//	#include "sqliteicu.h"
-//#else	//	defined(ICUSQLITE_HAVE_ICU_EXTENSIONS)
-//	#include "sqlite3.h"
-//#endif	//	!defined(ICUSQLITE_HAVE_ICU_EXTENSIONS)
+#if defined(ICUSQLITE_HAVE_ICU_EXTENSIONS) && \
+	(!defined(SQLITE_AMALGAMATION) || SQLITE_AMALGAMATION==0) && \
+	!defined(ICUSQLITE_USING_AMALGAMATION)
+	#include "sqliteicu.h"
+#else	//	defined(ICUSQLITE_HAVE_ICU_EXTENSIONS)
+	#include "sqlite3.h"
+#endif	//	!defined(ICUSQLITE_HAVE_ICU_EXTENSIONS)
 
-#include "sqlite3.h"
+//#include "sqlite3.h"
 
 //	ICU
 #include <unicode/utmscale.h>
 
-#if defined(ICUSQLITE3_ANDROID)
+#if defined(ICUSQLITE3_ANDROID) || defined(ICUSQLITE3_IOS)
 	#define SQLITE_SOFT_HEAP_LIMIT (4 * 1024 * 1024)
 #endif	//	defined(ICUSQLITE3_ANDROID)
 
@@ -186,7 +187,7 @@ static double IcuSqlite3Atof(
 //	IcuSqlite3StatementBuffer
 ///////////////////////////////////////////////////////////////////////////////
 IcuSqlite3StatementBuffer::IcuSqlite3StatementBuffer()
-	: m_buffer(NULL)
+	: m_buffer(nullptr)
 {
 }
 
@@ -197,9 +198,9 @@ IcuSqlite3StatementBuffer::~IcuSqlite3StatementBuffer()
 
 void IcuSqlite3StatementBuffer::Clear()
 {
-	if(NULL != m_buffer) {
+	if(nullptr != m_buffer) {
 		sqlite3_free(m_buffer);
-		m_buffer = NULL;
+		m_buffer = nullptr;
 	}
 }
 
@@ -230,21 +231,37 @@ int IcuSqlite3FunctionContext::GetArgCount() const
 	return m_argCount;
 }
 
+const unsigned char* IcuSqlite3FunctionContext::GetAsBlob(
+	const unsigned int n, int& len)
+{
+	//We must get the length of the blob BEFORE getting its contents.
+	//(see http://www.sqlite.org/c3ref/value_blob.html)
+	sqlite3_value* value = (sqlite3_value*)m_args[n];
+	len = sqlite3_value_bytes(value);
+	return static_cast<const unsigned char*>(sqlite3_value_blob(value));
+}
+
 UnicodeString IcuSqlite3FunctionContext::GetArgAsUnicodeString(
-	unsigned int n)
+	const unsigned int n)
 {
 	return UnicodeString(reinterpret_cast<const UChar*>(
 		sqlite3_value_text16((sqlite3_value*)m_args[n])));
 }
 
+int32_t IcuSqlite3FunctionContext::GetArgAsInt(
+	const unsigned int n)
+{
+	return sqlite3_value_int((sqlite3_value*)m_args[n]);
+}
+
 int64_t IcuSqlite3FunctionContext::GetArgAsInt64(
-	unsigned int n)
+	const unsigned int n)
 {
 	return sqlite3_value_int64((sqlite3_value*)m_args[n]);
 }
 
 double IcuSqlite3FunctionContext::GetArgAsDouble(
-	unsigned int n)
+	const unsigned int n)
 {
 	return sqlite3_value_double((sqlite3_value*)m_args[n]);
 }
@@ -290,8 +307,8 @@ void IcuSqlite3FunctionContext::SetNullResult()
 //	IcuSqlite3ResultSet - public
 ///////////////////////////////////////////////////////////////////////////////
 IcuSqlite3ResultSet::IcuSqlite3ResultSet()
-	: m_stmt(NULL)
-	, m_util(NULL)
+	: m_stmt(nullptr)
+	, m_util(nullptr)
 	, m_eof(true)
 	, m_first(true)
 	, m_cols(0)
@@ -301,14 +318,14 @@ IcuSqlite3ResultSet::IcuSqlite3ResultSet()
 
 IcuSqlite3ResultSet::IcuSqlite3ResultSet(
 	const IcuSqlite3ResultSet& resultSet)
-	: m_util(NULL)
+	: m_util(nullptr)
 {
 	m_stmt		= resultSet.m_stmt;
 	
 	//
 	//	only one IcuSqlite3ResultSet can own the statement at once
 	//
-	const_cast<IcuSqlite3ResultSet&>(resultSet).m_stmt = NULL;
+	const_cast<IcuSqlite3ResultSet&>(resultSet).m_stmt = nullptr;
 	
 	m_eof		= resultSet.m_eof;
 	m_first		= resultSet.m_first;
@@ -318,7 +335,7 @@ IcuSqlite3ResultSet::IcuSqlite3ResultSet(
 
 IcuSqlite3ResultSet::IcuSqlite3ResultSet(
 	void* db, void* stmt, bool eof, bool first, bool ownStmt /*= true*/)
-	: m_util(NULL)
+	: m_util(nullptr)
 {
 	m_db		= db;
 	m_stmt		= stmt;
@@ -341,14 +358,16 @@ IcuSqlite3ResultSet& IcuSqlite3ResultSet::operator=(
 	const IcuSqlite3ResultSet& resultSet)
 {
 	if(&resultSet != this) {
-		Finalize();
+		if(resultSet.m_stmt != m_stmt) {
+			Finalize();
+		}
 
 		m_stmt		= resultSet.m_stmt;
 		
 		//
 		//	only one IcuSqlite3ResultSet can own the statement at once
 		//
-		const_cast<IcuSqlite3ResultSet&>(resultSet).m_stmt = NULL;
+		const_cast<IcuSqlite3ResultSet&>(resultSet).m_stmt = nullptr;
 		
 		m_eof		= resultSet.m_eof;
 		m_first		= resultSet.m_first;
@@ -360,9 +379,9 @@ IcuSqlite3ResultSet& IcuSqlite3ResultSet::operator=(
 }
 
 int IcuSqlite3ResultSet::FindColumnIndex(
-	const UnicodeString& colName)
+	const UnicodeString& colName) const
 {
-	if(NULL == m_stmt || colName.isEmpty()) {
+	if(nullptr == m_stmt || colName.isEmpty()) {
 		return ICUSQLITE_COLUMN_IDX_INVALID;
 	}
 	
@@ -379,9 +398,9 @@ int IcuSqlite3ResultSet::FindColumnIndex(
 }
 
 UnicodeString IcuSqlite3ResultSet::GetColumnName(
-	const int colIdx)
+	const int colIdx) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return "";
 	}
 	
@@ -392,9 +411,9 @@ UnicodeString IcuSqlite3ResultSet::GetColumnName(
 }
 
 UnicodeString IcuSqlite3ResultSet::GetDeclaredColumnType(
-	const int colIdx)
+	const int colIdx) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return "";
 	}
 	
@@ -405,9 +424,9 @@ UnicodeString IcuSqlite3ResultSet::GetDeclaredColumnType(
 }
 
 EIcuSqlite3ColumnTypes IcuSqlite3ResultSet::GetColumnType(
-	const int colIdx)
+	const int colIdx) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return ICUSQLITE_COLUMN_TYPE_INVALID;
 	}
 	
@@ -416,12 +435,12 @@ EIcuSqlite3ColumnTypes IcuSqlite3ResultSet::GetColumnType(
 }
 
 UnicodeString IcuSqlite3ResultSet::GetDatabaseName(
-	const int colIdx)
+	const int colIdx) const
 {
 	UnicodeString name;
 
 #if ICUSQLITE_HAVE_METADATA
-	if(NULL != m_stmt && colIdx >= 0 && colIdx <= m_cols - 1) {
+	if(nullptr != m_stmt && colIdx >= 0 && colIdx <= m_cols - 1) {
 		const UChar* dbName = 
 			reinterpret_cast<const UChar*>(sqlite3_column_database_name16(
 				(sqlite3_stmt*)m_stmt, colIdx));
@@ -435,12 +454,12 @@ UnicodeString IcuSqlite3ResultSet::GetDatabaseName(
 }
 
 UnicodeString IcuSqlite3ResultSet::GetTableName(
-	const int colIdx)
+	const int colIdx) const
 {
 	UnicodeString name;
 
 #if ICUSQLITE_HAVE_METADATA
-	if(NULL != m_stmt && colIdx >= 0 && colIdx <= m_cols - 1) {
+	if(nullptr != m_stmt && colIdx >= 0 && colIdx <= m_cols - 1) {
 		const UChar* tblName = 
 			reinterpret_cast<const UChar*>(sqlite3_column_table_name16(
 				(sqlite3_stmt*)m_stmt, colIdx));
@@ -454,12 +473,12 @@ UnicodeString IcuSqlite3ResultSet::GetTableName(
 }
 
 UnicodeString IcuSqlite3ResultSet::GetOriginName(
-	const int colIdx)
+	const int colIdx) const
 {
 	UnicodeString name;
 
 #if ICUSQLITE_HAVE_METADATA
-	if(NULL != m_stmt && colIdx >= 0 && colIdx <= m_cols - 1) {
+	if(nullptr != m_stmt && colIdx >= 0 && colIdx <= m_cols - 1) {
 		const UChar* originName = 
 			reinterpret_cast<const UChar*>(sqlite3_column_origin_name16(
 				(sqlite3_stmt*)m_stmt, colIdx));
@@ -473,55 +492,55 @@ UnicodeString IcuSqlite3ResultSet::GetOriginName(
 }
 
 int32_t IcuSqlite3ResultSet::GetInt(
-	const int colIdx, const int32_t defVal /*= 0*/)
+	const int colIdx, const int32_t defVal /*= 0*/) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return defVal;
 	}
 	return sqlite3_column_int((sqlite3_stmt*)m_stmt, colIdx);
 }
 
 int32_t IcuSqlite3ResultSet::GetInt(
-	const UnicodeString& colName, const int32_t defVal /*= 0*/)
+	const UnicodeString& colName, const int32_t defVal /*= 0*/) const
 {
 	return GetInt(FindColumnIndex(colName), defVal);
 }
 
 int64_t IcuSqlite3ResultSet::GetInt64(
-	const int colIdx, const int64_t defVal /*= 0*/)
+	const int colIdx, const int64_t defVal /*= 0*/) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return defVal;
 	}
 	return sqlite3_column_int64((sqlite3_stmt*)m_stmt, colIdx);
 }
 
 int64_t IcuSqlite3ResultSet::GetInt64(
-	const UnicodeString& colName, const int64_t defVal /*= 0*/)
+	const UnicodeString& colName, const int64_t defVal /*= 0*/) const
 {
 	return GetInt64(FindColumnIndex(colName), defVal);
 }
 
 double IcuSqlite3ResultSet::GetDouble(
-	const int colIdx, const double defVal /*= 0.0*/)
+	const int colIdx, const double defVal /*= 0.0*/) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return defVal;
 	}
 	return sqlite3_column_double((sqlite3_stmt*)m_stmt, colIdx);
 }
 
 double IcuSqlite3ResultSet::GetDouble(
-	const UnicodeString& colName, const double defVal /*= 0.0*/)
+	const UnicodeString& colName, const double defVal /*= 0.0*/) const
 {
 	return GetDouble(FindColumnIndex(colName), defVal);
 }
 
 UnicodeString IcuSqlite3ResultSet::GetString(
 	const int colIdx, 
-	const UnicodeString& defVal /*= ""*/)
+	const UnicodeString& defVal /*= ""*/) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return defVal;
 	}
 	return reinterpret_cast<const UChar*>(
@@ -530,25 +549,25 @@ UnicodeString IcuSqlite3ResultSet::GetString(
 
 UnicodeString IcuSqlite3ResultSet::GetString(
 	const UnicodeString& colName,
-	const UnicodeString& defVal /*= ""*/)
+	const UnicodeString& defVal /*= ""*/) const
 {
 	return GetString(FindColumnIndex(colName), defVal);
 }
 
 std::string IcuSqlite3ResultSet::GetStringUTF8(
 	const int colIdx, 
-	const std::string& defVal /*= ""*/)
+	const std::string& defVal /*= ""*/) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		return defVal;
 	}
 	const unsigned char* utf8 = sqlite3_column_text((sqlite3_stmt*)m_stmt, colIdx);
-	return (NULL == utf8) ? "" : std::string((const char*)utf8);
+	return (nullptr == utf8) ? "" : std::string((const char*)utf8);
 }
 
 std::string IcuSqlite3ResultSet::GetStringUTF8(
 	const UnicodeString& colName,
-	const std::string& defVal /*= ""*/)
+	const std::string& defVal /*= ""*/) const
 {
 	return GetStringUTF8(FindColumnIndex(colName), defVal);
 }
@@ -578,6 +597,9 @@ UDate IcuSqlite3ResultSet::GetDateTime(
 
 		case ICUSQLITE_COLUMN_TYPE_FLOAT :
 			break;
+
+		default:
+			break;
 	}
 	
 	return defVal;
@@ -590,23 +612,23 @@ UDate IcuSqlite3ResultSet::GetDateTime(
 }
 
 bool IcuSqlite3ResultSet::GetBool(
-	const int colIdx, const bool defVal /*= false*/)
+	const int colIdx, const bool defVal /*= false*/) const
 {
 	return 0 != GetInt(colIdx, (defVal) ? 1 : 0);
 }
 
 bool IcuSqlite3ResultSet::GetBool(
-	const UnicodeString& colName, const bool defVal /*= false*/)
+	const UnicodeString& colName, const bool defVal /*= false*/) const
 {
 	return GetBool(FindColumnIndex(colName), defVal);
 }
 
 const unsigned char* IcuSqlite3ResultSet::GetBlob(
-	const int colIdx, int& len)
+	const int colIdx, int& len) const
 {
-	if(NULL == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_stmt || colIdx < 0 || colIdx > m_cols - 1) {
 		len = 0;
-		return NULL;
+		return nullptr;
 	}
 
 	len = sqlite3_column_bytes((sqlite3_stmt*)m_stmt, colIdx);
@@ -615,26 +637,26 @@ const unsigned char* IcuSqlite3ResultSet::GetBlob(
 }
 
 const unsigned char* IcuSqlite3ResultSet::GetBlob(
-	const UnicodeString& colName, int& len)
+	const UnicodeString& colName, int& len) const
 {
 	return GetBlob(FindColumnIndex(colName), len);
 }
 
 bool IcuSqlite3ResultSet::IsNull(
-	const int colIdx)
+	const int colIdx) const
 {
 	return (ICUSQLITE_COLUMN_TYPE_NULL == GetColumnType(colIdx));
 }
 
 bool IcuSqlite3ResultSet::IsNull(
-	const UnicodeString& colName)
+	const UnicodeString& colName) const
 {
 	return IsNull(FindColumnIndex(colName));
 }
 
 bool IcuSqlite3ResultSet::NextRow()
 {
-	if(NULL == m_stmt) {
+	if(nullptr == m_stmt) {
 		return false;
 	}
 	
@@ -657,27 +679,33 @@ bool IcuSqlite3ResultSet::NextRow()
 	
 	//	:TODO: should this just call Finalize()? what if !m_ownStmt ?
 	sqlite3_finalize((sqlite3_stmt*)m_stmt);
-	m_stmt = NULL;
+	m_stmt = nullptr;
 	return false;
 }
 
 void IcuSqlite3ResultSet::Finalize()
 {
-	if(m_stmt && m_ownStmt) {
-		sqlite3_finalize((sqlite3_stmt*)m_stmt);
-		m_stmt = NULL;
+	if(m_stmt) {
+		if(m_ownStmt) {
+			sqlite3_finalize((sqlite3_stmt*)m_stmt);
+			m_stmt = nullptr;
+		} else {
+			//We are done with this result set. Call reset to prevent locking the db.
+			//	(see http://www.sqlite.org/cvstrac/wiki?p=DatabaseIsLocked)
+			sqlite3_reset((sqlite3_stmt*)m_stmt);
+		}
 	}
 }
 
-const char* IcuSqlite3ResultSet::GetRawSQL()
+const char* IcuSqlite3ResultSet::GetRawSQL() const
 {
-	if(NULL == m_stmt) {
-		return NULL;
+	if(nullptr == m_stmt) {
+		return nullptr;
 	}
 	return sqlite3_sql((sqlite3_stmt*)m_stmt);
 }
 
-UnicodeString IcuSqlite3ResultSet::GetSQL()
+UnicodeString IcuSqlite3ResultSet::GetSQL() const
 {
 	UnicodeString sql;
 	const char* sqlUtf8 = GetRawSQL();
@@ -694,8 +722,8 @@ UnicodeString IcuSqlite3ResultSet::GetSQL()
 ///////////////////////////////////////////////////////////////////////////////
 
 IcuSqlite3Table::IcuSqlite3Table()
-	: m_results(NULL)
-	, m_util(NULL)
+	: m_results(nullptr)
+	, m_util(nullptr)
 	, m_rows(0)
 	, m_cols(0)
 	, m_currentRow(0)
@@ -704,14 +732,14 @@ IcuSqlite3Table::IcuSqlite3Table()
 
 IcuSqlite3Table::IcuSqlite3Table(
 	const IcuSqlite3Table& table)
-	: m_util(NULL)
+	: m_util(nullptr)
 {
 	m_results		= table.m_results;
 	
 	//
 	//	Only one IcuSqlite3Table can own the results
 	//
-	const_cast<IcuSqlite3Table&>(table).m_results = NULL;
+	const_cast<IcuSqlite3Table&>(table).m_results = nullptr;
 	m_rows			= table.m_rows;
 	m_cols			= table.m_cols;
 	m_currentRow	= table.m_currentRow;
@@ -719,7 +747,7 @@ IcuSqlite3Table::IcuSqlite3Table(
 
 IcuSqlite3Table::IcuSqlite3Table(
 	char** results, int rows, int cols)
-	: m_util(NULL)
+	: m_util(nullptr)
 {
 	m_results		= results;
 	m_rows			= rows;
@@ -747,7 +775,7 @@ IcuSqlite3Table& IcuSqlite3Table::operator=(
 		//
 		//	Only one IcuSqlite3Table can own the results
 		//
-		const_cast<IcuSqlite3Table&>(table).m_results = NULL;
+		const_cast<IcuSqlite3Table&>(table).m_results = nullptr;
 		m_rows			= table.m_rows;
 		m_cols			= table.m_cols;
 		m_currentRow	= table.m_currentRow;		
@@ -757,9 +785,9 @@ IcuSqlite3Table& IcuSqlite3Table::operator=(
 }
 
 int IcuSqlite3Table::FindColumnIndex(
-	const char* utf8ColName)
+	const char* utf8ColName) const
 {
-	if(NULL == m_results || NULL == utf8ColName ||
+	if(nullptr == m_results || nullptr == utf8ColName ||
 		'\0' == utf8ColName[0])
 	{
 		return ICUSQLITE_COLUMN_IDX_INVALID;
@@ -775,7 +803,7 @@ int IcuSqlite3Table::FindColumnIndex(
 }
 
 int IcuSqlite3Table::FindColumnIndex(
-	const UnicodeString& colName)
+	const UnicodeString& colName) const
 {	
 	//
 	//	m_results always contains UTF-8 char*'s so we'll need to convert
@@ -786,9 +814,9 @@ int IcuSqlite3Table::FindColumnIndex(
 }
 
 UnicodeString IcuSqlite3Table::GetColumnName(
-	const int colIdx)
+	const int colIdx) const
 {
-	if(NULL == m_results || colIdx < 0 || colIdx > m_cols - 1) {
+	if(nullptr == m_results || colIdx < 0 || colIdx > m_cols - 1) {
 		return "";
 	}
 	const char* name = m_results[colIdx];
@@ -800,7 +828,7 @@ UnicodeString IcuSqlite3Table::GetAsString(
 	const int colIdx)
 {
 	const char* val = GetValue(colIdx);
-	return (NULL == val) ? UNICODE_STRING_SIMPLE :
+	return (nullptr == val) ? UNICODE_STRING_SIMPLE :
 		UnicodeString::fromUTF8(val);
 }
 
@@ -813,80 +841,80 @@ UnicodeString IcuSqlite3Table::GetAsString(
 
 //	:TODO: we're already using STL, just use a to_string<> instead of scanf() on these:
 int IcuSqlite3Table::GetInt(
-	const int colIdx, const int defVal /*= 0*/)
+	const int colIdx, const int defVal /*= 0*/) const
 {
 	int result = defVal;
 	const char* val = GetValue(colIdx);
-	if(NULL != val) {	//	:TODO: does sscanf() do a NULL check?
+	if(nullptr != val) {	//	:TODO: does sscanf() do a null check?
 		sscanf(val, "%d", &result);
 	}
 	return result;
 }
 
 int IcuSqlite3Table::GetInt(
-	const UnicodeString& colName, const int defVal /*= 0*/)
+	const UnicodeString& colName, const int defVal /*= 0*/) const
 {
 	return GetInt(FindColumnIndex(colName), defVal);
 }
 
 int64_t IcuSqlite3Table::GetInt64(
-	const int colIdx, const int64_t defVal /*= 0*/)
+	const int colIdx, const int64_t defVal /*= 0*/) const
 {
 	int64_t result = defVal;
 	const char* val = GetValue(colIdx);
-	if(NULL != val) {	//	:TODO: sscanf() does this?
+	if(nullptr != val) {	//	:TODO: sscanf() does this?
 		sscanf(val, "%lld", &result);
 	}
 	return result;
 }
 
 int64_t IcuSqlite3Table::GetInt64(
-	const UnicodeString& colName, const int64_t defVal /*= 0*/)
+	const UnicodeString& colName, const int64_t defVal /*= 0*/) const
 {
 	return GetInt64(FindColumnIndex(colName), defVal);
 }
 
 double IcuSqlite3Table::GetDouble(
-	const int colIdx, const double defVal /*= 0.0*/)
+	const int colIdx, const double defVal /*= 0.0*/) const
 {
 	double result = defVal;
 	const char* val = GetValue(colIdx);
-	if(NULL != val) {
+	if(nullptr != val) {
 		result = IcuSqlite3Atof(val);
 	}
 	return result;
 }
 
 double IcuSqlite3Table::GetDouble(
-	const UnicodeString& colName, const double defVal /*= 0.0*/)
+	const UnicodeString& colName, const double defVal /*= 0.0*/) const
 {
 	return GetDouble(FindColumnIndex(colName), defVal);
 }
 
 UnicodeString IcuSqlite3Table::GetString(
-	const int colIdx, const UnicodeString& defVal /*= ""*/)
+	const int colIdx, const UnicodeString& defVal /*= ""*/) const
 {
 	const char* val = GetValue(colIdx);
-	return (NULL != val) ? UnicodeString::fromUTF8(val) : defVal;
+	return (nullptr != val) ? UnicodeString::fromUTF8(val) : defVal;
 }
 
 UnicodeString IcuSqlite3Table::GetString(
 	const UnicodeString& colName, 
-	const UnicodeString& defVal /*= ""*/)
+	const UnicodeString& defVal /*= ""*/) const
 {
 	return GetString(FindColumnIndex(colName), defVal);
 }
 
 std::string IcuSqlite3Table::GetStringUTF8(
-	const int colIdx, const std::string& defVal /*= ""*/)
+	const int colIdx, const std::string& defVal /*= ""*/) const
 {
 	const char* val = GetValue(colIdx);
-	return (NULL != val) ? val : defVal;
+	return (nullptr != val) ? val : defVal;
 }
 
 std::string IcuSqlite3Table::GetStringUTF8(
 	const UnicodeString& colName, 
-	const std::string& defVal /*= ""*/)
+	const std::string& defVal /*= ""*/) const
 {
 	return GetStringUTF8(FindColumnIndex(colName), defVal);
 }
@@ -897,7 +925,7 @@ int64_t IcuSqlite3Table::GetDateTime64(
 {
 	int64_t result = defVal;
 	const char* val = GetValue(colIdx);
-	if(NULL != val) {
+	if(nullptr != val) {
 		//
 		//	Since we're using the table API, we don't know what the column type
 		//	is here, so we'll have to guess. SQLite gives back dates in the 
@@ -910,7 +938,7 @@ int64_t IcuSqlite3Table::GetDateTime64(
 		//	* INTEGER as Unix Time, the number of seconds since 
 		//	1970-01-01 00:00:00 UTC. 
 		//
-		if(NULL != strchr(val, '-')) {
+		if(nullptr != strchr(val, '-')) {
 			//
 			//	TEXT - handler is ignored here
 			//
@@ -925,7 +953,7 @@ int64_t IcuSqlite3Table::GetDateTime64(
 					result = r64;
 				}
 			}
-		} else if (NULL != strchr(val, '.')) {
+		} else if (nullptr != strchr(val, '.')) {
 			//
 			//	REAL - handler is ignored here
 			//			
@@ -937,10 +965,15 @@ int64_t IcuSqlite3Table::GetDateTime64(
 					break;
 				
 				case ICUSQLITE_DATETIME_ICU_UTC :
+				{
 					int64_t utc = 0;
 					if(1 == sscanf(val, "%lld", &utc)) {
 						//	:TODO: int64_t UTC -> UDate
 					}
+				}
+					break;
+
+				default:
 					break;
 			}
 		}
@@ -977,7 +1010,7 @@ UDate IcuSqlite3Table::GetDateTimeUDate(
 
 	//UDate result = defVal;
 	//const char* val = GetValue(colIdx);
-	//if(NULL != val) {
+	//if(nullptr != val) {
 	//	//
 	//	//	Since we're using the table API, we don't know what the column type
 	//	//	is here, so we'll have to guess. SQLite gives back dates in the 
@@ -990,7 +1023,7 @@ UDate IcuSqlite3Table::GetDateTimeUDate(
 	//	//	* INTEGER as Unix Time, the number of seconds since 
 	//	//	1970-01-01 00:00:00 UTC. 
 	//	//
-	//	if(NULL != strchr(val, '-')) {
+	//	if(nullptr != strchr(val, '-')) {
 	//		//
 	//		//	TEXT - handler is ignored here
 	//		//
@@ -1008,7 +1041,7 @@ UDate IcuSqlite3Table::GetDateTimeUDate(
 	//				result = d;
 	//			}
 	//		}
-	//	} else if (NULL != strchr(val, '.')) {
+	//	} else if (nullptr != strchr(val, '.')) {
 	//		//
 	//		//	REAL - handler is ignored here
 	//		//			
@@ -1039,35 +1072,35 @@ UDate IcuSqlite3Table::GetDateTimeUDate(
 }
 
 bool IcuSqlite3Table::GetBool(
-	const int colIdx)
+	const int colIdx) const
 {
 	return 0 != GetInt(colIdx, 0);
 }
 
 bool IcuSqlite3Table::GetBool(
-	const UnicodeString& colName)
+	const UnicodeString& colName) const
 {
 	return 0 != GetInt(FindColumnIndex(colName), 0);
 }
 
 bool IcuSqlite3Table::IsNull(
-	const int colIdx)
+	const int colIdx) const
 {
 	const char* val = GetValue(colIdx);
-	return (NULL == val);
+	return (nullptr == val);
 }
 
 bool IcuSqlite3Table::IsNull(
-	const UnicodeString& colName)
+	const UnicodeString& colName) const
 {
 	return IsNull(FindColumnIndex(colName));
 }
 
 void IcuSqlite3Table::Finalize()
 {
-	if(NULL != m_results) {
+	if(nullptr != m_results) {
 		sqlite3_free_table(m_results);
-		m_results = NULL;
+		m_results = nullptr;
 	}
 }
 
@@ -1075,28 +1108,28 @@ void IcuSqlite3Table::Finalize()
 //	IcuSqlite3Statement
 ///////////////////////////////////////////////////////////////////////////////
 IcuSqlite3Statement::IcuSqlite3Statement()
-	: m_db(NULL)
-	, m_stmt(NULL)
-	, m_util(NULL)
+	: m_db(nullptr)
+	, m_stmt(nullptr)
+	, m_util(nullptr)
 {
 }
 
 IcuSqlite3Statement::IcuSqlite3Statement(
 	const IcuSqlite3Statement& stmt)
-	: m_util(NULL)
+	: m_util(nullptr)
 {
 	m_db	= stmt.m_db;
 	m_stmt	= stmt.m_stmt;
 
 	//	only one obj can own a statement
-	const_cast<IcuSqlite3Statement&>(stmt).m_stmt = NULL;
+	const_cast<IcuSqlite3Statement&>(stmt).m_stmt = nullptr;
 }
 
 IcuSqlite3Statement::IcuSqlite3Statement(
 	void* db, void* stmt)
 	: m_db(db)
 	, m_stmt(stmt)
-	, m_util(NULL)
+	, m_util(nullptr)
 {
 }
 
@@ -1119,7 +1152,7 @@ IcuSqlite3Statement& IcuSqlite3Statement::operator=(
 		m_stmt	= stmt.m_stmt;
 		
 		//	only one obj can own a statement
-		const_cast<IcuSqlite3Statement&>(stmt).m_stmt = NULL;
+		const_cast<IcuSqlite3Statement&>(stmt).m_stmt = nullptr;
 	}
 
 	return *this;
@@ -1127,7 +1160,7 @@ IcuSqlite3Statement& IcuSqlite3Statement::operator=(
 
 int IcuSqlite3Statement::ExecuteUpdate()
 {
-	if(NULL == m_db || NULL == m_stmt) {
+	if(nullptr == m_db || nullptr == m_stmt) {
 		return -1;
 	}
 
@@ -1144,8 +1177,8 @@ int IcuSqlite3Statement::ExecuteUpdate()
 
 IcuSqlite3ResultSet IcuSqlite3Statement::ExecuteQuery()
 {
-	if(NULL == m_db || NULL == m_stmt) {
-		return IcuSqlite3ResultSet(NULL, NULL, true);
+	if(nullptr == m_db || nullptr == m_stmt) {
+		return IcuSqlite3ResultSet(nullptr, nullptr, true);
 	}
 
 	switch(sqlite3_step((sqlite3_stmt*)m_stmt)) {
@@ -1158,19 +1191,79 @@ IcuSqlite3ResultSet IcuSqlite3Statement::ExecuteQuery()
 
 	//	something went wrong
 	sqlite3_reset((sqlite3_stmt*)m_stmt);
-	return IcuSqlite3ResultSet(NULL, NULL, true);
+	return IcuSqlite3ResultSet(nullptr, nullptr, true);
+}
+
+bool IcuSqlite3Statement::ExecuteScalar(UnicodeString& result)
+{
+	IcuSqlite3ResultSet r = ExecuteQuery();
+	if(!r.Eof() && r.GetColumnCount() > 0) {
+		result = r.GetString(0);
+		return true;
+	}
+	return false;
+}
+
+bool IcuSqlite3Statement::ExecuteScalar(std::string& result)
+{
+	IcuSqlite3ResultSet r = ExecuteQuery();
+	if(!r.Eof() && r.GetColumnCount() > 0) {
+		result = r.GetStringUTF8(0);
+		return true;
+	}
+	return false;
+}
+
+bool IcuSqlite3Statement::ExecuteScalar(int32_t& result)
+{
+	IcuSqlite3ResultSet r = ExecuteQuery();
+	if(!r.Eof() && r.GetColumnCount() > 0) {
+		result = r.GetInt(0);
+		return true;
+	}
+	return false;
+}
+
+bool IcuSqlite3Statement::ExecuteScalar(int64_t& result)
+{
+	IcuSqlite3ResultSet r = ExecuteQuery();
+	if(!r.Eof() && r.GetColumnCount() > 0) {
+		result = r.GetInt64(0);
+		return true;
+	}
+	return false;
+}
+
+bool IcuSqlite3Statement::ExecuteScalar(double& result)
+{
+	IcuSqlite3ResultSet r = ExecuteQuery();
+	if(!r.Eof() && r.GetColumnCount() > 0) {
+		result = r.GetDouble(0);
+		return true;
+	}
+	return false;
+}
+
+bool IcuSqlite3Statement::ExecuteScalar(bool& result)
+{
+	IcuSqlite3ResultSet r = ExecuteQuery();
+	if(!r.Eof() && r.GetColumnCount() > 0) {
+		result = r.GetBool(0);
+		return true;
+	}
+	return false;
 }
 
 int IcuSqlite3Statement::GetParamCount()
 {
-	return (NULL == m_stmt) ? 0 : 
+	return (nullptr == m_stmt) ? 0 : 
 		sqlite3_bind_parameter_count((sqlite3_stmt*)m_stmt);
 }
 
 int IcuSqlite3Statement::GetParamIndex(
 	const UnicodeString& paramName)
 {
-	if(NULL == m_stmt) {
+	if(nullptr == m_stmt) {
 		return 0;
 	}
 	
@@ -1182,7 +1275,7 @@ int IcuSqlite3Statement::GetParamIndex(
 UnicodeString IcuSqlite3Statement::GetParamName(
 	const int paramIdx)
 {
-	return (NULL == m_stmt) ? "" : 
+	return (nullptr == m_stmt) ? "" : 
 		UnicodeString::fromUTF8(
 			sqlite3_bind_parameter_name((sqlite3_stmt*)m_stmt, paramIdx));
 }
@@ -1190,7 +1283,7 @@ UnicodeString IcuSqlite3Statement::GetParamName(
 bool IcuSqlite3Statement::Bind(
 	const int paramIdx, const UnicodeString& paramValue)
 {
-	return (NULL != m_stmt && 
+	return (nullptr != m_stmt && 
 		SQLITE_OK == sqlite3_bind_text16((sqlite3_stmt*)m_stmt, paramIdx, 
 			(const void*)paramValue.getBuffer(), 
 			paramValue.length() * sizeof(UChar), SQLITE_TRANSIENT));
@@ -1200,7 +1293,7 @@ bool IcuSqlite3Statement::Bind(
 	const int paramIdx, const int paramValue)
 {
 	return (
-		NULL != m_stmt &&
+		nullptr != m_stmt &&
 		SQLITE_OK == sqlite3_bind_int((sqlite3_stmt*)m_stmt, paramIdx, 
 			paramValue));
 }
@@ -1209,16 +1302,25 @@ bool IcuSqlite3Statement::Bind(
 	const int paramIdx, const int64_t& paramValue)
 {
 	return (
-		NULL != m_stmt &&
+		nullptr != m_stmt &&
 		SQLITE_OK == sqlite3_bind_int64((sqlite3_stmt*)m_stmt, paramIdx, 
 			paramValue));
+}
+
+bool IcuSqlite3Statement::Bind(
+	const int paramIdx, const uint64_t& paramValue)
+{
+	return (
+		nullptr != m_stmt &&
+		SQLITE_OK == sqlite3_bind_int64((sqlite3_stmt*)m_stmt, paramIdx, 
+			static_cast<sqlite3_int64>(paramValue)));
 }
 
 bool IcuSqlite3Statement::Bind(
 	const int paramIdx, const double& paramValue)
 {
 	return (
-		NULL != m_stmt &&
+		nullptr != m_stmt &&
 		SQLITE_OK == sqlite3_bind_double((sqlite3_stmt*)m_stmt, paramIdx, 
 			paramValue));
 }
@@ -1227,7 +1329,7 @@ bool IcuSqlite3Statement::Bind(
 	const int paramIdx, const char* paramValue)
 {
 	return (
-		NULL != m_stmt &&
+		nullptr != m_stmt &&
 		SQLITE_OK == sqlite3_bind_text((sqlite3_stmt*)m_stmt, paramIdx,
 			paramValue, -1, SQLITE_TRANSIENT));
 }
@@ -1242,7 +1344,7 @@ bool IcuSqlite3Statement::Bind(
 	const int paramIdx, const unsigned char* blobValue, const int blobLen)
 {
 	return (
-		NULL != m_stmt &&
+		nullptr != m_stmt &&
 		SQLITE_OK == sqlite3_bind_blob((sqlite3_stmt*)m_stmt, paramIdx, 
 			(const void*)blobValue, blobLen, SQLITE_TRANSIENT));
 }
@@ -1331,7 +1433,7 @@ bool IcuSqlite3Statement::BindNull(
 	const int paramIdx)
 {
 	return (
-		NULL != m_stmt &&
+		nullptr != m_stmt &&
 		SQLITE_OK == sqlite3_bind_null((sqlite3_stmt*)m_stmt, paramIdx));
 }
 
@@ -1340,7 +1442,7 @@ bool IcuSqlite3Statement::BindZeroBlob(
 {
 #if SQLITE_VERSION_NUMBER >= 3004000
 	return (
-		NULL != m_stmt &&
+		nullptr != m_stmt &&
 		SQLITE_OK == sqlite3_bind_zeroblob((sqlite3_stmt*)m_stmt, paramIdx, 
 			blobSize));
 #else	//	SQLITE_VERSION_NUMBER >= 3004000
@@ -1350,18 +1452,18 @@ bool IcuSqlite3Statement::BindZeroBlob(
 
 void IcuSqlite3Statement::ClearBindings()
 {
-	if(NULL != m_stmt) {
+	if(nullptr != m_stmt) {
 		sqlite3_clear_bindings((sqlite3_stmt*)m_stmt);
 	}
 }
 
-UnicodeString IcuSqlite3Statement::GetSQL()
+UnicodeString IcuSqlite3Statement::GetSQL() const
 {
 	UnicodeString sql;
 #if SQLITE_VERSION_NUMBER >= 3005003
-	if(NULL != m_stmt) {
+	if(nullptr != m_stmt) {
 		const char* utf8Sql = sqlite3_sql((sqlite3_stmt*)m_stmt);
-		if(NULL != utf8Sql) {
+		if(nullptr != utf8Sql) {
 			sql = UnicodeString::fromUTF8(utf8Sql);
 		}
 	}
@@ -1372,7 +1474,7 @@ UnicodeString IcuSqlite3Statement::GetSQL()
 
 void IcuSqlite3Statement::Reset()
 {
-	if(NULL != m_stmt) {
+	if(nullptr != m_stmt) {
 		sqlite3_reset((sqlite3_stmt*)m_stmt);
 	}
 }
@@ -1381,9 +1483,9 @@ void IcuSqlite3Statement::Reset()
 
 void IcuSqlite3Statement::Finalize()
 {
-	if(NULL != m_stmt) {
+	if(nullptr != m_stmt) {
 		sqlite3_finalize((sqlite3_stmt*)m_stmt);
-		m_stmt = NULL;
+		m_stmt = nullptr;
 	}
 }
 
@@ -1392,7 +1494,7 @@ void IcuSqlite3Statement::Finalize()
 //	IcuSqlite3Database
 ///////////////////////////////////////////////////////////////////////////////
 IcuSqlite3Database::IcuSqlite3Database()
-	: m_db(NULL)
+	: m_db(nullptr)
 	, m_busyTimeout(60000)	//	60 sec
 	, m_encrypted(false)
 {
@@ -1416,7 +1518,7 @@ IcuSqlite3Database& IcuSqlite3Database::operator=(
 	const IcuSqlite3Database& db)
 {
 	if(&db != this) {
-		if(NULL == m_db) {
+		if(nullptr == m_db) {
 			m_db			= db.m_db;
 			m_busyTimeout	= db.m_busyTimeout;
 			m_encrypted		= db.m_encrypted;
@@ -1438,7 +1540,7 @@ bool IcuSqlite3Database::Open(
 	int keyLen = static_cast<int>(utf8Key.length());
 
 	return Open(filename, flags, extFlags, 
-		(keyLen > 0) ? reinterpret_cast<const unsigned char*>(utf8Key.data()) : NULL, 
+		(keyLen > 0) ? reinterpret_cast<const unsigned char*>(utf8Key.data()) : nullptr, 
 		keyLen);
 }
 
@@ -1446,21 +1548,21 @@ bool IcuSqlite3Database::Open(
 	const UnicodeString& filename, 
 	const int flags /*= ICUSQLITE_OPEN_READWRITE | ICUSQLITE_OPEN_CREATE*/,
 	const int extFlags /*= ICUSQLITE_EXT_OPEN_DEFAULT*/,
-	const unsigned char* key /*= NULL*/,
+	const unsigned char* key /*= nullptr*/,
 	const int keyLen /*= 0*/)
 {
 	std::string utf8Filename;
 	filename.toUTF8String(utf8Filename);
 
 	int rc = sqlite3_open_v2(utf8Filename.data(),
-		(sqlite3**)&m_db, flags, NULL);
+		(sqlite3**)&m_db, flags, nullptr);
 	
 	if(SQLITE_OK != rc) {
 		Close();
 		return false;
 	}
 	
-#if defined(ICUSQLITE3_ANDROID)
+#if defined(ICUSQLITE3_ANDROID) || defined(ICUSQLITE3_IOS)
 	//	:TODO: expose this API & call wrapper
 	sqlite3_soft_heap_limit(SQLITE_SOFT_HEAP_LIMIT);
 #endif	//	defined(ICUSQLITE3_ANDROID)
@@ -1477,7 +1579,7 @@ bool IcuSqlite3Database::Open(
 	//	database [file], we'll need to PRAGMA UTF-16 t
 
 #if ICUSQLITE_HAVE_CODEC
-	if(NULL != key && keyLen > 0) {
+	if(nullptr != key && keyLen > 0) {
 		rc = sqlite3_key((sqlite3*)m_db, key, keyLen);
 		if(SQLITE_OK != rc) {
 			Close();
@@ -1487,6 +1589,10 @@ bool IcuSqlite3Database::Open(
 	}
 #endif	//	ICUSQLITE_HAVE_CODEC
 
+    if((extFlags & 1) == ICUSQLITE_OPEN_READONLY){
+        return true;
+    }
+    
 	SetBusyTimeout(m_busyTimeout);
 
 	//
@@ -1503,24 +1609,35 @@ bool IcuSqlite3Database::Open(
 		ExecuteUpdate("PRAGMA encoding=\"UTF-16\";");
 	}
 	
+	if((extFlags & ICUSQLITE_EXT_OPEN_FK)) {
+		ExecuteUpdate("PRAGMA foreign_keys=ON;");
+	}
+
+	if((extFlags & ICUSQLITE_EXT_OPEN_WAL)) {
+		std::string walModeCheck;
+		ExecuteScalar("PRAGMA journal_mode=WAL;", walModeCheck);
+		if("wal" != walModeCheck) {
+			Close();
+			return false;
+		}
+	}
+	
 	//	:TODO: integrity check if requested
 	
 	//	:TODO: implement optional integrity check, see http://www.netmite.com/android/mydroid/frameworks/base/core/jni/android_database_SQLiteDatabase.cpp
 
-/*
-#if defined(ICUSQLITE_HAVE_ICU_EXTENSIONS)
+#if defined(ICUSQLITE_HAVE_ICU_EXTENSIONS) && !defined(ICUSQLITE_USING_AMALGAMATION)
 	if((extFlags & ICUSQLITE_EXT_OPEN_ICUEXT)) {
 		sqlite3IcuInit((sqlite3*)m_db);
 	}
-#endif	//	defined(ICUSQLITE_HAVE_ICU_EXTENSIONS
-*/
+#endif	//	defined(ICUSQLITE_HAVE_ICU_EXTENSIONS && !defined(ICUSQLITE_USING_AMALGAMATION)
 
 	return true;
 }
 
 void IcuSqlite3Database::Close()
 {
-	if(NULL != m_db) {
+	if(nullptr != m_db) {
 	
 #if SQLITE_VERSION_NUMBER >= 3006000
 		//
@@ -1532,7 +1649,7 @@ void IcuSqlite3Database::Close()
 		}
 #endif	//	SQLITE_VERSION_NUMBER >= 3006000
 		sqlite3_close((sqlite3*)m_db);
-		m_db = NULL;
+		m_db = nullptr;
 		m_encrypted = false;
 	}
 }
@@ -1545,18 +1662,18 @@ bool IcuSqlite3Database::Backup(
 	targetKey.toUTF8String(utf8TargetKey);
 	int targetKeyLen = static_cast<int>(utf8TargetKey.length());
 	const unsigned char* tk = (targetKeyLen > 0) ? 
-		reinterpret_cast<const unsigned char*>(utf8TargetKey.data()) : NULL;
+		reinterpret_cast<const unsigned char*>(utf8TargetKey.data()) : nullptr;
 	return Backup(targetFilename, tk, targetKeyLen, sourceDatabase);
 
 }
 
 bool IcuSqlite3Database::Backup(
-	const UnicodeString& targetFilename, const unsigned char* targetKey /*= NULL*/, 
+	const UnicodeString& targetFilename, const unsigned char* targetKey /*= nullptr*/, 
 	const int keyLen /*= 0*/, 
 	const UnicodeString& sourceDatabase /*= "main"*/)
 {
 #if SQLITE_VERSION_NUMBER >= 3006011
-	if(NULL == m_db) {
+	if(nullptr == m_db) {
 		return false;
 	}
 
@@ -1571,7 +1688,7 @@ bool IcuSqlite3Database::Backup(
 	}
 
 #if ICUSQLITE_HAVE_CODEC
-	if(NULL != targetKey && keyLen > 0) {
+	if(nullptr != targetKey && keyLen > 0) {
 		rc = sqlite3_key(dest, targetKey, keyLen);
 		if(SQLITE_OK != rc) {
 			sqlite3_close(dest);
@@ -1586,7 +1703,7 @@ bool IcuSqlite3Database::Backup(
 	sqlite3_backup* backup = sqlite3_backup_init(dest, "main", (sqlite3*)m_db,
 		utf8SourceDatabase.data());
 	
-	if(NULL == backup) {
+	if(nullptr == backup) {
 		sqlite3_close(dest);
 		return false;
 	}
@@ -1615,17 +1732,17 @@ EIcuSqlite3RestoreResults IcuSqlite3Database::Restore(
 	int sourceKeyLen = static_cast<int>(utf8SourceKey.length());
 	const unsigned char* sk = 
 		reinterpret_cast<const unsigned char*>(utf8SourceKey.data());
-	return Restore(sourceFilename, (sourceKeyLen > 0) ? sk : NULL, 
+	return Restore(sourceFilename, (sourceKeyLen > 0) ? sk : nullptr, 
 		sourceKeyLen, targetDatabase);
 }
 
 EIcuSqlite3RestoreResults IcuSqlite3Database::Restore(
-	const UnicodeString& sourceFilename, const unsigned char* sourceKey/* = NULL*/, 
+	const UnicodeString& sourceFilename, const unsigned char* sourceKey/* = nullptr*/, 
 	const int keyLen /*= 0*/, 
 	const UnicodeString& targetDatabase /*= "main"*/)
 {
 #if SQLITE_VERSION_NUMBER >= 3006011
-	if(NULL == m_db) {
+	if(nullptr == m_db) {
 		return ICUSQLITE_RESTORE_FAILED;
 	}
 
@@ -1640,7 +1757,7 @@ EIcuSqlite3RestoreResults IcuSqlite3Database::Restore(
 	}
 
 #if ICUSQLITE_HAVE_CODEC
-	if(NULL != sourceKey && keyLen > 0) {
+	if(nullptr != sourceKey && keyLen > 0) {
 		rc = sqlite3_key(src, sourceKey, keyLen);
 		if(SQLITE_OK != rc) {
 			sqlite3_close(src);
@@ -1655,7 +1772,7 @@ EIcuSqlite3RestoreResults IcuSqlite3Database::Restore(
 	sqlite3_backup* backup = sqlite3_backup_init((sqlite3*)m_db, 
 		utf8TargetDatabase.data(), src, "main");
 	
-	if(NULL == backup) {
+	if(nullptr == backup) {
 		sqlite3_close(src);
 		return ICUSQLITE_RESTORE_FAILED;
 	}
@@ -1726,10 +1843,13 @@ bool IcuSqlite3Database::Rollback(
 	return (-1 != ExecuteUpdate(sql.data()));
 }
 
-bool IcuSqlite3Database::IsAutoCommitMode()
+bool IcuSqlite3Database::IsAutoCommitMode() const
 {
-	return (NULL != m_db &&
-		0 != sqlite3_get_autocommit((sqlite3*)m_db));
+	if(nullptr == m_db) {
+		return false;
+	}
+
+	return 0 != sqlite3_get_autocommit((sqlite3*)m_db);
 }
 
 bool IcuSqlite3Database::Savepoint(
@@ -1762,7 +1882,7 @@ bool IcuSqlite3Database::ReleaseSavepoint(
 
 bool IcuSqlite3Database::TableExists(
 	const UnicodeString& tableName, 
-	const UnicodeString& dbName /*= ""*/)
+	const UnicodeString& dbName /*= ""*/) const
 {
 	int result = 0;
 	const char* sqlBuf;
@@ -1789,7 +1909,7 @@ bool IcuSqlite3Database::TableExists(
 }
 
 bool IcuSqlite3Database::TableExists(
-	const char* tableName, const char* dbName /*= NULL*/)
+	const char* tableName, const char* dbName /*= nullptr*/) const
 {
 	return TableExists(UnicodeString::fromUTF8(tableName),
 		UnicodeString::fromUTF8(dbName));
@@ -1797,7 +1917,7 @@ bool IcuSqlite3Database::TableExists(
 
 void IcuSqlite3Database::GetDatabaseNames(
 	std::set<std::string>& dbNames, 
-	std::set<std::string>& dbFiles)
+	std::set<std::string>& dbFiles) const
 {
 	dbNames.clear();
 	dbFiles.clear();
@@ -1813,6 +1933,39 @@ void IcuSqlite3Database::GetDatabaseNames(
 	}
 }
 
+bool IcuSqlite3Database::Attach(
+	const UnicodeString& dbPath, const std::string& asName)
+{
+	
+	std::string utf8;
+	return (-1 != ExecuteUpdate(IcuSqlite3StatementBuffer().Format(
+		"ATTACH DATABASE '%s' "
+		"AS %s;", dbPath.toUTF8String(utf8).c_str(), asName.c_str())));
+}
+
+bool IcuSqlite3Database::IsAttached(
+	const std::string& alias) const
+{
+	IcuSqlite3ResultSet results = ExecuteQuery("PRAGMA database_list;");
+	std::string utf8;	//	temp conversion buffer
+	while(results.NextRow()) {
+		if(alias == results.GetString(1).toUTF8String(utf8)) {
+			return true;
+		}
+		utf8.clear();	//	ready for next conversion
+	}
+	return false;
+}
+
+int IcuSqlite3Database::GetAttachedCount() const
+{
+	IcuSqlite3ResultSet results = ExecuteQuery("PRAGMA database_list;");
+	int count = 0;
+	while(results.NextRow()) {
+		++count;
+	}
+	return count;
+}
 
 int IcuSqlite3Database::ExecuteUpdate(
 	const UnicodeString& sql)
@@ -1824,15 +1977,16 @@ int IcuSqlite3Database::ExecuteUpdate(
 int IcuSqlite3Database::ExecuteUpdate(
 	const char* sql)
 {
-	if(NULL == m_db) {
+	if(nullptr == m_db) {
 		return -1;
 	}
 
-	char* err = NULL;
+	char* err = nullptr;
 	if(SQLITE_OK == sqlite3_exec((sqlite3*)m_db, sql, 0, 0, &err)) {
 		return sqlite3_changes((sqlite3*)m_db);
 	}
 
+	sqlite3_free(err);
 	return -1;
 }
 
@@ -1844,13 +1998,12 @@ int IcuSqlite3Database::ExecuteUpdate(
 
 // ...
 IcuSqlite3ResultSet IcuSqlite3Database::ExecuteQuery(
-	const UnicodeString& sql)
+	const UnicodeString& sql) const
 {
 	sqlite3_stmt* stmt = 
-		static_cast<sqlite3_stmt*>(Prepare(sql.getBuffer(), 
-			sql.length() * sizeof(UChar)));
+		static_cast<sqlite3_stmt*>(Prepare(sql.getBuffer(), sql.length() * sizeof(UChar)));
 
-	if(NULL == stmt) {
+	if(nullptr == stmt) {
 		return IcuSqlite3ResultSet(m_db, stmt, true);
 	}
 
@@ -1861,17 +2014,17 @@ IcuSqlite3ResultSet IcuSqlite3Database::ExecuteQuery(
 
 	//	something went wrong
 	sqlite3_finalize(stmt);
-	return IcuSqlite3ResultSet(m_db, NULL, true);
+	return IcuSqlite3ResultSet(m_db, nullptr, true);
 }
 
 IcuSqlite3ResultSet IcuSqlite3Database::ExecuteQuery(
-	const char* sql)
+	const char* sql) const
 {
 	return ExecuteQuery(UnicodeString::fromUTF8(sql));
 }
 
 IcuSqlite3ResultSet IcuSqlite3Database::ExecuteQuery(
-	const IcuSqlite3StatementBuffer& sql)
+	const IcuSqlite3StatementBuffer& sql) const
 {
 	return ExecuteQuery(UnicodeString::fromUTF8(static_cast<const char*>(sql)));
 }
@@ -1879,7 +2032,7 @@ IcuSqlite3ResultSet IcuSqlite3Database::ExecuteQuery(
 // ...
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const UnicodeString& sql, UnicodeString& result)
+	const UnicodeString& sql, UnicodeString& result) const
 {
 	IcuSqlite3ResultSet r = ExecuteQuery(sql);
 	if(!r.Eof() && r.GetColumnCount() > 0) {
@@ -1890,13 +2043,13 @@ bool IcuSqlite3Database::ExecuteScalar(
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const char* sql, UnicodeString& result)
+	const char* sql, UnicodeString& result) const
 {
 	return ExecuteScalar(UnicodeString::fromUTF8(sql), result);
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const UnicodeString& sql, int32_t& result)
+	const UnicodeString& sql, int32_t& result) const
 {
 	IcuSqlite3ResultSet r = ExecuteQuery(sql);
 	if(!r.Eof() && r.GetColumnCount() > 0) {
@@ -1907,13 +2060,13 @@ bool IcuSqlite3Database::ExecuteScalar(
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const char* sql, int32_t& result)
+	const char* sql, int32_t& result) const
 {
 	return ExecuteScalar(UnicodeString::fromUTF8(sql), result);
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const UnicodeString& sql, int64_t& result)
+	const UnicodeString& sql, int64_t& result) const
 {
 	IcuSqlite3ResultSet r = ExecuteQuery(sql);
 	if(!r.Eof() && r.GetColumnCount() > 0) {
@@ -1924,13 +2077,13 @@ bool IcuSqlite3Database::ExecuteScalar(
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const char* sql, int64_t& result)
+	const char* sql, int64_t& result) const
 {
 	return ExecuteScalar(UnicodeString::fromUTF8(sql), result);
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const UnicodeString& sql, double& result)
+	const UnicodeString& sql, double& result) const
 {
 	IcuSqlite3ResultSet r = ExecuteQuery(sql);
 	if(!r.Eof() && r.GetColumnCount() > 0) {
@@ -1941,13 +2094,13 @@ bool IcuSqlite3Database::ExecuteScalar(
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const char* sql, double& result)
+	const char* sql, double& result) const
 {
 	return ExecuteScalar(UnicodeString::fromUTF8(sql), result);
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const UnicodeString& sql, bool& result)
+	const UnicodeString& sql, bool& result) const
 {
 	IcuSqlite3ResultSet r = ExecuteQuery(sql);
 	if(!r.Eof() && r.GetColumnCount() > 0) {
@@ -1958,13 +2111,13 @@ bool IcuSqlite3Database::ExecuteScalar(
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const char* sql, bool& result)
+	const char* sql, bool& result) const
 {
 	return ExecuteScalar(UnicodeString::fromUTF8(sql), result);
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const UnicodeString& sql, std::string& result)
+	const UnicodeString& sql, std::string& result) const
 {
 	IcuSqlite3ResultSet r = ExecuteQuery(sql);
 	if(!r.Eof() && r.GetColumnCount() > 0) {
@@ -1975,7 +2128,7 @@ bool IcuSqlite3Database::ExecuteScalar(
 }
 
 bool IcuSqlite3Database::ExecuteScalar(
-	const char* sql, std::string& result)
+	const char* sql, std::string& result) const
 {
 	return ExecuteScalar(UnicodeString::fromUTF8(sql), result);
 }
@@ -1998,7 +2151,7 @@ bool IcuSqlite3Database::ExecuteScalarDateTime(
 }
 
 IcuSqlite3Table IcuSqlite3Database::GetTable(
-	const UnicodeString& sql)
+	const UnicodeString& sql) const
 {
 	std::string utf8SqlBuf;
 	return GetTable(
@@ -2006,14 +2159,14 @@ IcuSqlite3Table IcuSqlite3Database::GetTable(
 }
 
 IcuSqlite3Table IcuSqlite3Database::GetTable(
-	const char* sql)
+	const char* sql) const
 {
-	if(NULL == m_db) {
-		return IcuSqlite3Table(NULL, 0, 0);
+	if(nullptr == m_db) {
+		return IcuSqlite3Table(nullptr, 0, 0);
 	}
 
-	char** results = NULL;
-	char* err = NULL;
+	char** results = nullptr;
+	char* err = nullptr;
 	int rows = 0;
 	int cols = 0;
 
@@ -2022,21 +2175,21 @@ IcuSqlite3Table IcuSqlite3Database::GetTable(
 	{
 		return IcuSqlite3Table(results, rows, cols);
 	}
-
-	return IcuSqlite3Table(NULL, 0, 0);
+	sqlite3_free(err);
+	return IcuSqlite3Table(nullptr, 0, 0);
 }
 
 IcuSqlite3Table IcuSqlite3Database::GetTable(
-	const IcuSqlite3StatementBuffer& sql)
+	const IcuSqlite3StatementBuffer& sql) const
 {
 	return GetTable(static_cast<const char*>(sql));
 }
 
 IcuSqlite3Statement IcuSqlite3Database::PrepareStatement(
-	const UnicodeString& sql)
+	const UnicodeString& sql) const
 {
-	if(NULL == m_db) {
-		return IcuSqlite3Statement(NULL, NULL);
+	if(nullptr == m_db) {
+		return IcuSqlite3Statement(nullptr, nullptr);
 	}
 
 	sqlite3_stmt* stmt = (sqlite3_stmt*)Prepare(sql.getBuffer(), 
@@ -2045,26 +2198,31 @@ IcuSqlite3Statement IcuSqlite3Database::PrepareStatement(
 }
 
 IcuSqlite3Statement IcuSqlite3Database::PrepareStatement(
-	const char* sql)
+	const char* sql) const
 {
 	return PrepareStatement(UnicodeString::fromUTF8(sql));
 }
 
 IcuSqlite3Statement IcuSqlite3Database::PrepareStatement(
-	const IcuSqlite3StatementBuffer& sql)
+	const IcuSqlite3StatementBuffer& sql) const
 {
 	return PrepareStatement(static_cast<const char*>(sql));
 }
 
-int64_t IcuSqlite3Database::GetLastRowId()
+int64_t IcuSqlite3Database::GetLastRowId() const
 {
 	return sqlite3_last_insert_rowid((sqlite3*)m_db);
+}
+
+int64_t IcuSqlite3Database::GetChanges() const
+{
+	return sqlite3_changes((sqlite3*)m_db);
 }
 
 bool IcuSqlite3Database::SetBusyTimeout(
 	const int ms)
 {
-	if(NULL != m_db &&
+	if(nullptr != m_db &&
 		(SQLITE_OK == sqlite3_busy_timeout((sqlite3*)m_db, ms)))
 	{
 		m_busyTimeout = ms;
@@ -2077,8 +2235,10 @@ bool IcuSqlite3Database::CreateScalarFunction(
 	const char* funcName, const int args, IcuSqlite3ScalarFunction* func)
 {	
 	typedef void (*XFUNC)(sqlite3_context*, int, sqlite3_value**);
-	return (NULL != func && NULL != m_db && 
-		(SQLITE_OK == sqlite3_create_function(
+	typedef void (*XDESTROY)(void*);
+
+	return (nullptr != func && nullptr != m_db && 
+		(SQLITE_OK == sqlite3_create_function_v2(
 			(sqlite3*)m_db,
 			funcName,
 			args,
@@ -2089,8 +2249,9 @@ bool IcuSqlite3Database::CreateScalarFunction(
 #endif
 			func,
 			(XFUNC)xFunc,
-			NULL,
-			NULL)));
+			nullptr,
+			nullptr,
+			(XDESTROY)xDestroyScalar)));
 }
 
 bool IcuSqlite3Database::CreateAggregateFunction(
@@ -2098,9 +2259,10 @@ bool IcuSqlite3Database::CreateAggregateFunction(
 {
 	typedef void (*XSTEP)(sqlite3_context*, int, sqlite3_value**);
 	typedef void (*XFINAL)(sqlite3_context*);
+	typedef void (*XDESTROY)(void*);
 
-	return (NULL != func && NULL != m_db && 
-		(SQLITE_OK == sqlite3_create_function(
+	return (nullptr != func && nullptr != m_db && 
+		(SQLITE_OK == sqlite3_create_function_v2(
 			(sqlite3*)m_db,
 			funcName,
 			args,
@@ -2110,17 +2272,64 @@ bool IcuSqlite3Database::CreateAggregateFunction(
 			SQLITE_UTF16LE,
 #endif
 			func,
-			NULL,
+			nullptr,
 			(XSTEP)xStep,
-			(XFINAL)xFinalize)));
+			(XFINAL)xFinalize,
+			(XDESTROY)xDestroyAggregate)));
 }
 
 // ...
 
-int IcuSqlite3Database::GetLastErrorCode(
-	const bool extended /*= false*/)
+bool IcuSqlite3Database::ReKey(
+	const char* key)
 {
-	if(NULL == m_db) {
+#if ICUSQLITE_HAVE_CODEC
+	sqlite3_mutex* mutex = sqlite3_db_mutex((sqlite3*)m_db);
+	sqlite3_mutex_enter(mutex);
+	int r = sqlite3_rekey(
+		(sqlite3*)m_db,
+		reinterpret_cast<const void*>(key),
+		static_cast<int>(strlen(key)));
+	sqlite3_mutex_leave(mutex);
+	return SQLITE_OK == r;
+#else
+	return false;
+#endif
+}
+
+bool IcuSqlite3Database::ReKey(
+	const unsigned char* keyBuf, const int keyLen)
+{
+	return SQLITE_OK == sqlite3_rekey(
+		(sqlite3*)m_db,
+		reinterpret_cast<const void*>(keyBuf),
+		keyLen);
+}
+
+int IcuSqlite3Database::GetLimit(
+	const EIcuSqlite3Limit limit) const
+{
+	if(!IsOpen()) {
+		return -1;
+	}
+
+	return sqlite3_limit((sqlite3*)m_db, (int)limit, -1);
+}
+
+int IcuSqlite3Database::SetLimit(
+	const EIcuSqlite3Limit limit, const int value)
+{
+	if(!IsOpen()) {
+		return false;
+	}
+
+	return sqlite3_limit((sqlite3*)m_db, (int)limit, value);
+}
+
+int IcuSqlite3Database::GetLastErrorCode(
+	const bool extended /*= false*/) const
+{
+	if(nullptr == m_db) {
 		return 0;
 	}
 	
@@ -2129,14 +2338,38 @@ int IcuSqlite3Database::GetLastErrorCode(
 		sqlite3_errcode((sqlite3*)m_db);
 }
 
-UnicodeString IcuSqlite3Database::GetLastErrorMessage()
+UnicodeString IcuSqlite3Database::GetDatabaseFileName(
+	const UnicodeString& dbName) const
 {
-	if(NULL == m_db) {
+	if(nullptr == m_db) {
+		return UNICODE_STRING_SIMPLE("");
+	}
+
+	std::string utf8Temp;
+	const char* fileName = sqlite3_db_filename((sqlite3*)m_db, dbName.toUTF8String(utf8Temp).c_str());
+	return UnicodeString::fromUTF8(fileName);
+}
+
+UnicodeString IcuSqlite3Database::GetLastErrorMessage() const
+{
+	if(nullptr == m_db) {
 		return UNICODE_STRING_SIMPLE("");
 	}
 	
 	const UChar* errMsg = (const UChar*)(sqlite3_errmsg16((sqlite3*)m_db));
 	return UnicodeString(errMsg, -1);
+}
+
+int IcuSqlite3Database::GetLastSystemErrorCode() const
+{
+	if(!IsOpen()) {
+		return -1;
+	}
+	int err = 0;
+	if(SQLITE_OK != sqlite3_file_control((sqlite3*)m_db, nullptr, SQLITE_LAST_ERRNO, &err)) {
+		return -2;
+	}
+	return err;
 }
 
 //...
@@ -2145,19 +2378,19 @@ UnicodeString IcuSqlite3Database::GetLastErrorMessage()
 //	IcuSqlite3Database - private
 ///////////////////////////////////////////////////////////////////////////////
 void* IcuSqlite3Database::Prepare(
-	const UChar* sql, const int32_t sqlLen /*= -1*/)
+	const UChar* sql, const int32_t sqlLen /*= -1*/) const
 {
-	if(NULL == m_db) {
-		return NULL;
+	if(nullptr == m_db) {
+		return nullptr;
 	}
 
-	const UChar* tail = NULL;
+	const UChar* tail = nullptr;
 	sqlite3_stmt* stmt;
 
 	if(SQLITE_OK != sqlite3_prepare16_v2((sqlite3*)m_db, (void*)sql, sqlLen, 
 		&stmt, (const void**)&tail)) 
 	{
-		return NULL;
+		return nullptr;
 	}
 
 	return stmt;
@@ -2170,7 +2403,7 @@ void IcuSqlite3Database::xFunc(
 	IcuSqlite3ScalarFunction* sqlFunc = 
 		reinterpret_cast<IcuSqlite3ScalarFunction*>(sqlite3_user_data(
 			(sqlite3_context*)ctxt));
-	if(NULL != sqlFunc) {
+	if(nullptr != sqlFunc) {
 		IcuSqlite3FunctionContext context(ctxt, argCount, args);
 		sqlFunc->Scalar(&context);
 	}
@@ -2183,7 +2416,7 @@ void IcuSqlite3Database::xStep(
 	IcuSqlite3AggregateFunction* sqlFunc = 
 		reinterpret_cast<IcuSqlite3AggregateFunction*>(sqlite3_user_data(
 			(sqlite3_context*)ctxt));
-	if(NULL != sqlFunc) {
+	if(nullptr != sqlFunc) {
 		IcuSqlite3FunctionContext context(ctxt, argCount, args);
 		sqlFunc->Step(&context);
 	}
@@ -2196,9 +2429,27 @@ void IcuSqlite3Database::xFinalize(
 	IcuSqlite3AggregateFunction* sqlFunc = 
 		reinterpret_cast<IcuSqlite3AggregateFunction*>(sqlite3_user_data(
 			(sqlite3_context*)ctxt));
-	if(NULL != sqlFunc) {
-		IcuSqlite3FunctionContext context(ctxt, 0, NULL);
+	if(nullptr != sqlFunc) {
+		IcuSqlite3FunctionContext context(ctxt, 0, nullptr);
 		sqlFunc->Finalize(&context);
+	}
+}
+
+/*static*/
+void IcuSqlite3Database::xDestroyScalar(
+	void* userData)
+{
+	if(userData) {
+		delete (IcuSqlite3ScalarFunction*)userData;
+	}
+}
+
+/*static*/
+void IcuSqlite3Database::xDestroyAggregate(
+	void* userData)
+{
+	if(userData) {
+		delete (IcuSqlite3AggregateFunction*)userData;
 	}
 }
 
@@ -2285,30 +2536,66 @@ bool IcuSqlite3Database::HasSupport(
 	return (ms_supportFlags & supportFor) ? true : false;
 }
 
-#if defined(ICUSQLITE3_ANDROID)
-/*static*/
-void IcuSqlite3Database::ReleaseMemory()
+bool IcuSqlite3Database::WALCheckpoint(
+	const char* dbName /*= nullptr*/, const EIcuSqlite3WALCheckpoint checkpointType /*= ICUSQLITE_WAL_CHECKPOINT_PASSIVE*/) const
 {
-	sqlite3_release_memory(SQLITE_SOFT_HEAP_LIMIT);
+	int mode;
+	switch(checkpointType) {
+		case ICUSQLITE_WAL_CHECKPOINT_PASSIVE	: mode = SQLITE_CHECKPOINT_PASSIVE; break;
+		case ICUSQLITE_WAL_CHECKPOINT_FULL		: mode = SQLITE_CHECKPOINT_FULL; break;
+		case ICUSQLITE_WAL_CHECKPOINT_RESTART	: mode = SQLITE_CHECKPOINT_RESTART; break;
+		
+		default : 
+			return false;
+	}
+	return (SQLITE_OK == ::sqlite3_wal_checkpoint_v2((sqlite3*)m_db, dbName, mode, nullptr, nullptr));
+}
+
+#if defined(ICUSQLITE3_ANDROID) || defined(ICUSQLITE3_IOS)
+/*static*/
+int IcuSqlite3Database::ReleaseMemory()
+{
+	return sqlite3_release_memory(SQLITE_SOFT_HEAP_LIMIT);
 }
 #endif	//	defined(ICUSQLITE3_ANDROID)
+
+int IcuSqlite3Database::RecoverMemory()
+{
+	return sqlite3_db_release_memory((sqlite3*)m_db);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 //	IcuSqlite3Transaction
 ///////////////////////////////////////////////////////////////////////////////
 IcuSqlite3Transaction::IcuSqlite3Transaction(
-	IcuSqlite3Database* db, const EIcuSqlite3TransTypes type /*= ICUSQLITE_TRANSACTION_DEFAULT*/)
+	IcuSqlite3Database* db, const bool commitOnDestroy)
 	: m_db(db)
 	, m_transOpen(false)
+	, m_commitOnDestroy(commitOnDestroy)
 {
-		//	:TODO: assert(NULL != db);
+	assert(nullptr != db);
+}
 
+IcuSqlite3Transaction::IcuSqlite3Transaction(
+	IcuSqlite3Database* db, const EIcuSqlite3TransTypes type /*= ICUSQLITE_TRANSACTION_DEFAULT*/,
+	const bool commitOnDestroy /*= true*/)
+	: m_db(db)
+	, m_transOpen(false)
+	, m_commitOnDestroy(commitOnDestroy)
+{
+	assert(nullptr != db);
 	Open(type);
 }
 
 IcuSqlite3Transaction::~IcuSqlite3Transaction()
 {
-	Flush(false);
+	if(m_transOpen) {
+		if(m_commitOnDestroy) {
+			Flush(false);
+		} else {
+			Rollback(false);
+		}
+	}
 }
 
 bool IcuSqlite3Transaction::Open(
@@ -2328,7 +2615,7 @@ bool IcuSqlite3Transaction::Flush(
 {
 	bool ret = true;
 	if(m_transOpen) {
-		if(ret = ((m_transOk) ? m_db->Commit() : m_db->Rollback())) {
+		if((ret = ((m_transOk) ? m_db->Commit() : m_db->Rollback()))) {
 			m_transOpen = false;
 		}
 	}
@@ -2373,4 +2660,19 @@ bool IcuSqlite3Transaction::Execute(
 	}
 	m_transOk = (-1 != m_db->ExecuteUpdate(sql));
 	return m_transOk;
+}
+
+bool IcuSqlite3Transaction::Execute(
+	IcuSqlite3Statement& stmt)
+{
+	if(!m_transOk) {
+		return false;
+	}
+	m_transOk = (-1 != stmt.ExecuteUpdate());
+	return m_transOk;
+}
+
+int64_t IcuSqlite3Transaction::GetLastRowId() const
+{
+	return m_db->GetLastRowId();
 }
